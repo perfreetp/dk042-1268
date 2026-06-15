@@ -1,3 +1,5 @@
+import type { Article as MockArticle, Case as MockCase } from '@/data/mockArticles';
+
 export type ServiceType =
   | 'order'
   | 'payment'
@@ -90,6 +92,9 @@ export interface Contribution {
   diffContent?: string;
   status: ContributionStatus;
   createdAt: string;
+  articleData?: MockArticle;
+  patch?: Partial<MockArticle>;
+  caseData?: MockCase;
 }
 
 export interface ReviewRecord {
@@ -107,4 +112,19 @@ export interface SearchFilter {
   errorCode?: string;
   version?: string;
   tags?: string[];
+}
+
+export type FeedbackStatus = 'pending' | 'resolved' | 'rejected';
+
+export interface InvalidFeedback {
+  id: string;
+  articleId: string;
+  reporter: string;
+  reasons: string[];
+  description: string;
+  status: FeedbackStatus;
+  createdAt: string;
+  handler?: string;
+  handleRemark?: string;
+  handledAt?: string;
 }

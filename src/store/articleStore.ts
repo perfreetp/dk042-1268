@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Rating, ServiceType, SearchFilter } from '@/types';
 import { mockArticles, type Article, type Case } from '@/data/mockArticles';
 import { searchArticles, type SearchFilter as SearchFilterType } from '@/utils/search';
+import { storage, StorageKeys } from '@/utils/storage';
 
 type MockServiceType = typeof mockArticles[number]['service'];
 
@@ -15,6 +16,17 @@ interface NewCaseInput extends Partial<Case> {
   solution?: string;
 }
 
+const STORAGE_KEY_ARTICLES = StorageKeys.KNOWLEDGE_ARTICLES;
+
+function loadArticles(): Article[] {
+  const stored = storage.getItem<Article[]>(STORAGE_KEY_ARTICLES);
+  return stored ?? mockArticles;
+}
+
+function persistArticles(articles: Article[]): void {
+  storage.setItem(STORAGE_KEY_ARTICLES, articles);
+}
+
 interface ArticleStoreState {
   articles: Article[];
   filter: SearchFilter;
@@ -26,10 +38,14 @@ interface ArticleStoreState {
   addCase: (articleId: string, caseItem: NewCaseInput) => void;
   getArticleById: (id: string) => Article | undefined;
   getArticlesByService: () => Record<ServiceType | 'all', number>;
+  updateArticle: (id: string, patch: Partial<Article>) => void;
+  addNewArticle: (article: Article) => void;
+  updateArticleFromContribution: (id: string, patch: Partial<Article>) => void;
+  addCaseToArticle: (articleId: string, caseData: Case) => void;
 }
 
 export const useArticleStore = create<ArticleStoreState>((set, get) => ({
-  articles: mockArticles,
+  articles: loadArticles(),
   filter: {
     keyword: '',
     service: 'all',
@@ -55,16 +71,20 @@ export const useArticleStore = create<ArticleStoreState>((set, get) => ({
     return searchArticles(articles, searchFilter);
   },
 
-  incrementViewCount: (id) => set((state) => ({
-    articles: state.articles.map((article) =>
+  incrementViewCount: (id) => {
+    const { articles } = get();
+    const newArticles = articles.map((article) =>
       article.id === id
         ? { ...article, viewCount: article.viewCount + 1 }
         : article
-    )
-  })),
+    );
+    persistArticles(newArticles);
+    set({ articles: newArticles });
+  },
 
-  addRating: (articleId, rating) => set((state) => ({
-    articles: state.articles.map((article) => {
+  addRating: (articleId, rating) => {
+    const { articles } = get();
+    const newArticles = articles.map((article) => {
       if (article.id !== articleId) return article;
       const newRatingCount = article.ratingCount + 1;
       const newRatingAvg =
@@ -74,11 +94,14 @@ export const useArticleStore = create<ArticleStoreState>((set, get) => ({
         ratingAvg: Number(newRatingAvg.toFixed(1)),
         ratingCount: newRatingCount
       };
-    })
-  })),
+    });
+    persistArticles(newArticles);
+    set({ articles: newArticles });
+  },
 
-  addCase: (articleId, caseItem) => set((state) => ({
-    articles: state.articles.map((article) => {
+  addCase: (articleId, caseItem) => {
+    const { articles } = get();
+    const newArticles = articles.map((article) => {
       if (article.id !== articleId) return article;
       const newCase: Case = {
         title: caseItem.title ?? caseItem.scene ?? '未命名案例',
@@ -90,8 +113,10 @@ export const useArticleStore = create<ArticleStoreState>((set, get) => ({
         ...article,
         cases: [...article.cases, newCase]
       };
-    })
-  })),
+    });
+    persistArticles(newArticles);
+    set({ articles: newArticles });
+  },
 
   getArticleById: (id) => {
     const { articles } = get();
@@ -105,5 +130,43 @@ export const useArticleStore = create<ArticleStoreState>((set, get) => ({
       counts[article.service] = (counts[article.service] ?? 0) + 1;
     }
     return counts as Record<ServiceType | 'all', number>;
+  },
+
+  updateArticle: (id, patch) => {
+    const { articles } = get();
+    const newArticles = articles.map((article) =>
+      article.id === id ? { ...article, ...patch } : article
+    );
+    persistArticles(newArticles);
+    set({ articles: newArticles });
+  },
+
+  addNewArticle: (article) => {
+    const { articles } = get();
+    const newArticles = [...articles, article];
+    persistArticles(newArticles);
+    set({ articles: newArticles });
+  },
+
+  updateArticleFromContribution: (id, patch) => {
+    const { articles } = get();
+    const newArticles = articles.map((article) =>
+      article.id === id ? { ...article, ...patch, updatedAt: new Date().toISOString() } : article
+    );
+    persistArticles(newArticles);
+    set({ articles: newArticles });
+  },
+
+  addCaseToArticle: (articleId, caseData) => {
+    const { articles } = get();
+    const newArticles = articles.map((article) => {
+      if (article.id !== articleId) return article;
+      return {
+        ...article,
+        cases: [...article.cases, caseData]
+      };
+    });
+    persistArticles(newArticles);
+    set({ articles: newArticles });
   }
 }));

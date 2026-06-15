@@ -18,17 +18,22 @@ import {
   ChevronLeft,
   ChevronRight,
   SortDesc,
-  SortAsc
+  SortAsc,
+  ThumbsUp,
+  ThumbsDown,
+  MessageSquare,
+  ShieldAlert,
+  ListTodo
 } from 'lucide-react';
 import MainLayout from '@/components/Layout/MainLayout';
 import Badge from '@/components/UI/Badge';
 import Button from '@/components/UI/Button';
 import Modal from '@/components/UI/Modal';
 import { useReviewStore } from '@/store/reviewStore';
-import type { Contribution, ContributionType, ReviewRecord } from '@/types';
+import type { Contribution, ContributionType, ReviewRecord, InvalidFeedback, FeedbackStatus } from '@/types';
 import { cn } from '@/lib/utils';
 
-type TabKey = 'pending' | 'history';
+type TabKey = 'pending' | 'history' | 'feedback';
 
 const CURRENT_REVIEWER = '当前审核人';
 
@@ -139,15 +144,37 @@ function DiffRenderer({ segments }: { segments: DiffSegment[] }) {
   );
 }
 
+const FEEDBACK_REASON_OPTIONS = ['内容过时', '步骤错误', '命令无效', '描述不清', '其他'];
+
+const FEEDBACK_STATUS_COLORS: Record<FeedbackStatus, 'warning' | 'success' | 'danger'> = {
+  pending: 'warning',
+  resolved: 'success',
+  rejected: 'danger'
+};
+
+const FEEDBACK_STATUS_LABELS: Record<FeedbackStatus, string> = {
+  pending: '待处理',
+  resolved: '已处理',
+  rejected: '已驳回'
+};
+
+type FeedbackSubTab = 'pending' | 'history';
+
 export default function ReviewPage() {
   const {
     contributions,
     reviewRecords,
+    feedbacks,
     submitContribution,
     approveContribution,
     rejectContribution,
     getPendingContributions,
-    getContributionHistory
+    getContributionHistory,
+    submitFeedback,
+    resolveFeedback,
+    rejectFeedback,
+    getPendingFeedbacks,
+    getFeedbackHistory
   } = useReviewStore();
 
   const [activeTab, setActiveTab] = useState<TabKey>('pending');
@@ -168,6 +195,18 @@ export default function ReviewPage() {
     summary: '',
     content: ''
   });
+
+  const [feedbackSubTab, setFeedbackSubTab] = useState<FeedbackSubTab>('pending');
+  const [handleFeedbackModalOpen, setHandleFeedbackModalOpen] = useState(false);
+  const [selectedFeedback, setSelectedFeedback] = useState<InvalidFeedback | null>(null);
+  const [feedbackHandleAction, setFeedbackHandleAction] = useState<'resolve' | 'reject'>('resolve');
+  const [feedbackHandleRemark, setFeedbackHandleRemark] = useState('');
+  const [feedbackQuickRemarks, setFeedbackQuickRemarks] = useState<Record<string, string>>({});
+
+  const pendingFeedbackList = useMemo(() => getPendingFeedbacks(), [getPendingFeedbacks]);
+  const feedbackHistoryList = useMemo(() => getFeedbackHistory(), [getFeedbackHistory]);
+
+  const pendingFeedbackCount = pendingFeedbackList.length;
 
   const pendingList = useMemo(() => {
     let list = getPendingContributions();
@@ -306,6 +345,64 @@ export default function ReviewPage() {
     URL.revokeObjectURL(url);
   }
 
+  function openHandleFeedback(feedback: InvalidFeedback, action: 'resolve' | 'reject') {
+    setSelectedFeedback(feedback);
+    setFeedbackHandleAction(action);
+    setFeedbackHandleRemark(feedbackQuickRemarks[feedback.id] ?? '');
+    setHandleFeedbackModalOpen(true);
+  }
+
+  function handleFeedbackSubmit() {
+    if (!selectedFeedback || !feedbackHandleRemark.trim()) return;
+    if (feedbackHandleAction === 'resolve') {
+      resolveFeedback(selectedFeedback.id, CURRENT_REVIEWER, feedbackHandleRemark.trim());
+    } else {
+      rejectFeedback(selectedFeedback.id, CURRENT_REVIEWER, feedbackHandleRemark.trim());
+    }
+    setHandleFeedbackModalOpen(false);
+    setSelectedFeedback(null);
+    setFeedbackHandleRemark('');
+    setFeedbackQuickRemarks(prev => {
+      const next = { ...prev };
+      delete next[selectedFeedback.id];
+      return next;
+    });
+  }
+
+  function handleFeedbackQuickResolve(feedbackId: string) {
+    const remark = feedbackQuickRemarks[feedbackId];
+    if (!remark?.trim()) {
+      const feedback = feedbacks.find(f => f.id === feedbackId);
+      if (feedback) {
+        openHandleFeedback(feedback, 'resolve');
+      }
+      return;
+    }
+    resolveFeedback(feedbackId, CURRENT_REVIEWER, remark.trim());
+    setFeedbackQuickRemarks(prev => {
+      const next = { ...prev };
+      delete next[feedbackId];
+      return next;
+    });
+  }
+
+  function handleFeedbackQuickReject(feedbackId: string) {
+    const remark = feedbackQuickRemarks[feedbackId];
+    if (!remark?.trim()) {
+      const feedback = feedbacks.find(f => f.id === feedbackId);
+      if (feedback) {
+        openHandleFeedback(feedback, 'reject');
+      }
+      return;
+    }
+    rejectFeedback(feedbackId, CURRENT_REVIEWER, remark.trim());
+    setFeedbackQuickRemarks(prev => {
+      const next = { ...prev };
+      delete next[feedbackId];
+      return next;
+    });
+  }
+
   const originalContent = selectedContribution
     ? `# ${selectedContribution.title}\n\n${selectedContribution.summary}\n\n` +
       (selectedContribution.type === 'update_article'
@@ -409,6 +506,7 @@ export default function ReviewPage() {
                     : 'text-slate-600 hover:text-slate-900'
                 )}
               >
+                <ListTodo className="h-4 w-4" />
                 待审核
                 {stats.pending > 0 && (
                   <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-100 px-1.5 text-xs font-medium text-amber-700">
@@ -425,10 +523,28 @@ export default function ReviewPage() {
                     : 'text-slate-600 hover:text-slate-900'
                 )}
               >
+                <FileText className="h-4 w-4" />
                 审核记录
                 <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-slate-200 px-1.5 text-xs font-medium text-slate-600">
                   {reviewRecords.length}
                 </span>
+              </button>
+              <button
+                onClick={() => setActiveTab('feedback')}
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all',
+                  activeTab === 'feedback'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                )}
+              >
+                <ShieldAlert className="h-4 w-4" />
+                失效反馈
+                {pendingFeedbackCount > 0 && (
+                  <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-100 px-1.5 text-xs font-medium text-rose-700">
+                    {pendingFeedbackCount}
+                  </span>
+                )}
               </button>
             </div>
 
@@ -737,6 +853,237 @@ export default function ReviewPage() {
               )}
             </div>
           )}
+
+          {activeTab === 'feedback' && (
+            <div>
+              <div className="flex items-center gap-1 border-b border-slate-200 px-6 pt-4">
+                <button
+                  onClick={() => setFeedbackSubTab('pending')}
+                  className={cn(
+                    'inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-all -mb-px',
+                    feedbackSubTab === 'pending'
+                      ? 'border-teal-500 text-teal-600'
+                      : 'border-transparent text-slate-500 hover:text-slate-700'
+                  )}
+                >
+                  <Clock className="h-4 w-4" />
+                  待处理
+                  {pendingFeedbackList.length > 0 && (
+                    <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-100 px-1.5 text-xs font-medium text-amber-700">
+                      {pendingFeedbackList.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setFeedbackSubTab('history')}
+                  className={cn(
+                    'inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-all -mb-px',
+                    feedbackSubTab === 'history'
+                      ? 'border-teal-500 text-teal-600'
+                      : 'border-transparent text-slate-500 hover:text-slate-700'
+                  )}
+                >
+                  <FileText className="h-4 w-4" />
+                  历史记录
+                  <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-slate-200 px-1.5 text-xs font-medium text-slate-600">
+                    {feedbackHistoryList.length}
+                  </span>
+                </button>
+              </div>
+
+              <div className="p-6">
+                {feedbackSubTab === 'pending' && (
+                  pendingFeedbackList.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-50">
+                        <CheckCircle2 className="h-8 w-8 text-green-500" />
+                      </div>
+                      <p className="mt-4 text-base font-medium text-slate-700">太棒了，所有失效反馈都已处理！</p>
+                      <p className="mt-1 text-sm text-slate-500">暂无待处理的失效反馈</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {pendingFeedbackList.map(feedback => (
+                        <div
+                          key={feedback.id}
+                          className="rounded-xl border border-slate-200 bg-white p-5 transition-shadow hover:shadow-md"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="warning">
+                                <AlertCircle className="mr-1 h-3 w-3" />
+                                {FEEDBACK_STATUS_LABELS[feedback.status]}
+                              </Badge>
+                              {feedback.reasons.map((reason, idx) => (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center rounded-md bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700 ring-1 ring-inset ring-rose-600/20"
+                                >
+                                  {reason}
+                                </span>
+                              ))}
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-slate-500">
+                              <div className="flex items-center gap-2">
+                                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-rose-400 to-orange-500 text-xs font-medium text-white">
+                                  {getInitials(feedback.reporter)}
+                                </div>
+                                <span className="font-medium text-slate-700">{feedback.reporter}</span>
+                              </div>
+                              <span className="text-slate-300">|</span>
+                              <span>{formatDateTime(feedback.createdAt)}</span>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 space-y-3">
+                            <div className="flex items-center gap-2 text-sm">
+                              <span className="text-slate-500">关联文章：</span>
+                              <a
+                                href="#/article"
+                                className="inline-flex items-center gap-1 text-teal-600 hover:text-teal-700 hover:underline"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                {feedback.articleId} - 查看文章
+                              </a>
+                            </div>
+                            <div>
+                              <p className="text-xs font-medium text-slate-500 mb-1">问题描述：</p>
+                              <p className="text-sm text-slate-600 leading-relaxed">
+                                {feedback.description}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="mt-5 space-y-4 border-t border-slate-100 pt-4">
+                            <div className="flex items-center gap-2">
+                              <MessageSquare className="h-4 w-4 text-slate-400" />
+                              <input
+                                type="text"
+                                placeholder="添加处理备注（必填）"
+                                value={feedbackQuickRemarks[feedback.id] ?? ''}
+                                onChange={e => setFeedbackQuickRemarks(prev => ({
+                                  ...prev,
+                                  [feedback.id]: e.target.value
+                                }))}
+                                className="flex-1 h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                              />
+                            </div>
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => openHandleFeedback(feedback, 'reject')}
+                              >
+                                <ThumbsDown className="h-4 w-4" />
+                                驳回
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() => openHandleFeedback(feedback, 'resolve')}
+                              >
+                                <ThumbsUp className="h-4 w-4" />
+                                标记已处理
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                )}
+
+                {feedbackSubTab === 'history' && (
+                  feedbackHistoryList.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-50">
+                        <Search className="h-8 w-8 text-slate-300" />
+                      </div>
+                      <p className="mt-4 text-base font-medium text-slate-700">暂无历史记录</p>
+                      <p className="mt-1 text-sm text-slate-500">处理过的失效反馈将显示在这里</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {feedbackHistoryList.map(feedback => (
+                        <div
+                          key={feedback.id}
+                          className="rounded-xl border border-slate-200 bg-white p-5 transition-shadow hover:shadow-md"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant={FEEDBACK_STATUS_COLORS[feedback.status]}>
+                                {feedback.status === 'resolved' ? (
+                                  <CheckCircle2 className="mr-1 h-3 w-3" />
+                                ) : (
+                                  <XCircle className="mr-1 h-3 w-3" />
+                                )}
+                                {FEEDBACK_STATUS_LABELS[feedback.status]}
+                              </Badge>
+                              {feedback.reasons.map((reason, idx) => (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center rounded-md bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700 ring-1 ring-inset ring-rose-600/20"
+                                >
+                                  {reason}
+                                </span>
+                              ))}
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-slate-500">
+                              <div className="flex items-center gap-2">
+                                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-rose-400 to-orange-500 text-xs font-medium text-white">
+                                  {getInitials(feedback.reporter)}
+                                </div>
+                                <span className="font-medium text-slate-700">{feedback.reporter}</span>
+                              </div>
+                              <span className="text-slate-300">|</span>
+                              <span>{formatDateTime(feedback.createdAt)}</span>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 space-y-3">
+                            <div className="flex items-center gap-2 text-sm">
+                              <span className="text-slate-500">关联文章：</span>
+                              <a
+                                href="#/article"
+                                className="inline-flex items-center gap-1 text-teal-600 hover:text-teal-700 hover:underline"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                {feedback.articleId} - 查看文章
+                              </a>
+                            </div>
+                            <div>
+                              <p className="text-xs font-medium text-slate-500 mb-1">问题描述：</p>
+                              <p className="text-sm text-slate-600 leading-relaxed">
+                                {feedback.description}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <User className="h-3.5 w-3.5 text-slate-500" />
+                              <span className="text-slate-600">
+                                处理人：<span className="font-medium text-slate-800">{feedback.handler}</span>
+                              </span>
+                              <span className="text-slate-300">·</span>
+                              <span className="text-slate-500">
+                                处理时间：{feedback.handledAt ? formatDateTime(feedback.handledAt) : '-'}
+                              </span>
+                            </div>
+                            <div>
+                              <p className="text-xs font-medium text-slate-500 mb-1">处理备注：</p>
+                              <p className="text-sm text-slate-700 leading-relaxed">
+                                {feedback.handleRemark}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -981,6 +1328,129 @@ export default function ReviewPage() {
             />
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={handleFeedbackModalOpen && selectedFeedback !== null}
+        onClose={() => {
+          setHandleFeedbackModalOpen(false);
+          setSelectedFeedback(null);
+          setFeedbackHandleRemark('');
+        }}
+        title={
+          selectedFeedback
+            ? `${feedbackHandleAction === 'resolve' ? '标记已处理' : '驳回反馈'} - ${selectedFeedback.articleId}`
+            : ''
+        }
+        footer={
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1">
+              <textarea
+                placeholder="请输入处理备注（必填）"
+                value={feedbackHandleRemark}
+                onChange={e => setFeedbackHandleRemark(e.target.value)}
+                rows={2}
+                className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              />
+            </div>
+            <div className="flex items-center gap-2 sm:shrink-0">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setHandleFeedbackModalOpen(false);
+                  setSelectedFeedback(null);
+                  setFeedbackHandleRemark('');
+                }}
+              >
+                取消
+              </Button>
+              {feedbackHandleAction === 'resolve' ? (
+                <Button
+                  onClick={handleFeedbackSubmit}
+                  disabled={!feedbackHandleRemark.trim()}
+                >
+                  <ThumbsUp className="h-4 w-4" />
+                  确认已处理
+                </Button>
+              ) : (
+                <Button
+                  variant="danger"
+                  onClick={handleFeedbackSubmit}
+                  disabled={!feedbackHandleRemark.trim()}
+                >
+                  <ThumbsDown className="h-4 w-4" />
+                  确认驳回
+                </Button>
+              )}
+            </div>
+          </div>
+        }
+      >
+        {selectedFeedback && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-50 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={FEEDBACK_STATUS_COLORS[selectedFeedback.status]}>
+                  {FEEDBACK_STATUS_LABELS[selectedFeedback.status]}
+                </Badge>
+                {selectedFeedback.reasons.map((reason, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center rounded-md bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700 ring-1 ring-inset ring-rose-600/20"
+                  >
+                    {reason}
+                  </span>
+                ))}
+              </div>
+              <div className="flex items-center gap-3 text-xs text-slate-500">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-rose-400 to-orange-500 text-[10px] font-medium text-white">
+                    {getInitials(selectedFeedback.reporter)}
+                  </div>
+                  <span>{selectedFeedback.reporter}</span>
+                </div>
+                <span className="text-slate-300">·</span>
+                <span>{formatDateTime(selectedFeedback.createdAt)}</span>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-medium text-slate-500 mb-1">关联文章：</p>
+              <a
+                href="#/article"
+                className="inline-flex items-center gap-1 text-teal-600 hover:text-teal-700 hover:underline text-sm"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                {selectedFeedback.articleId} - 查看关联文章
+              </a>
+            </div>
+
+            <div>
+              <p className="text-xs font-medium text-slate-500 mb-1">问题描述：</p>
+              <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-600 leading-relaxed">
+                {selectedFeedback.description}
+              </div>
+            </div>
+
+            {feedbackHandleAction === 'resolve' ? (
+              <div className="flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 p-3">
+                <ThumbsUp className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
+                <div className="text-xs text-green-800">
+                  <p className="font-medium">操作说明</p>
+                  <p className="mt-1">标记为已处理后，该反馈状态将更新为"已处理"，并记录处理人和处理时间。请确保相关问题已在知识库中修复。</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3">
+                <ThumbsDown className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+                <div className="text-xs text-rose-800">
+                  <p className="font-medium">操作说明</p>
+                  <p className="mt-1">驳回后该反馈状态将更新为"已驳回"。请在备注中说明驳回原因，方便反馈人理解。</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
     </MainLayout>
   );

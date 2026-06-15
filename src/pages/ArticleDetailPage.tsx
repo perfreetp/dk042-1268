@@ -24,6 +24,7 @@ import StepList from '@/components/Article/StepList';
 import CommandBlock from '@/components/Article/CommandBlock';
 import { useArticleStore } from '@/store/articleStore';
 import { useFavoriteStore } from '@/store/favoriteStore';
+import { useReviewStore } from '@/store/reviewStore';
 import type { Article, ServiceType } from '@/data/mockArticles';
 import type { Step, Command, Rating } from '@/types';
 import { serviceLabels } from '@/data/mockArticles';
@@ -104,6 +105,7 @@ export default function ArticleDetailPage() {
 
   const toggleFavorite = useFavoriteStore((s) => s.toggleFavorite);
   const isFavorite = useFavoriteStore((s) => s.isFavorite);
+  const submitFeedback = useReviewStore((s) => s.submitFeedback);
 
   const article = id ? getArticleById(id) : undefined;
   const favorited = id ? isFavorite(id) : false;
@@ -175,7 +177,20 @@ export default function ArticleDetailPage() {
   };
 
   const handleReportInvalid = () => {
-    alert('已提交失效反馈，感谢您的贡献！');
+    if (!id) return;
+    if (selectedReasons.length === 0 && !feedbackText.trim()) {
+      alert('请至少选择一个失效原因或补充描述');
+      return;
+    }
+    submitFeedback({
+      articleId: id,
+      reporter: '当前用户',
+      reasons: selectedReasons.length > 0 ? selectedReasons : ['其他'],
+      description: feedbackText.trim() || '用户未填写具体描述',
+    });
+    setSelectedReasons([]);
+    setFeedbackText('');
+    alert('失效反馈已提交，相关负责人会尽快处理，感谢您的贡献！');
   };
 
   const toggleReason = (reason: FeedbackReason) => {

@@ -161,7 +161,10 @@ export default function FavoritesPage() {
   };
 
   const handleGenerate = () => {
-    if (selectedIds.size === 0) return;
+    if (selectedIds.size === 0) {
+      alert('请至少选择一篇文章');
+      return;
+    }
     setGenerating(true);
     setProgress(0);
 

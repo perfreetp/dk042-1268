@@ -15,13 +15,15 @@ import {
   CheckCircle2,
   ListChecks,
   ExternalLink,
-  Hash
+  Hash,
+  Heart
 } from 'lucide-react';
 import MainLayout from '@/components/Layout/MainLayout';
 import { Badge } from '@/components/UI/Badge';
 import { Button } from '@/components/UI/Button';
 import { Tag } from '@/components/UI/Tag';
 import { useArticleStore } from '@/store/articleStore';
+import { useFavoriteStore } from '@/store/favoriteStore';
 import type { SearchFilter } from '@/types';
 import type { Article, ServiceType as MockServiceType } from '@/data/mockArticles';
 import { serviceLabels as mockServiceLabels } from '@/data/mockArticles';
@@ -178,6 +180,8 @@ function getMatchScoreColor(score: number): string {
 export default function DiagnosisPage() {
   const navigate = useNavigate();
   const { filter, setFilter, getFilteredArticles } = useArticleStore();
+  const favorites = useFavoriteStore(s => s.favorites);
+  const toggleFavorite = useFavoriteStore(s => s.toggleFavorite);
 
   const [selectedPhenomena, setSelectedPhenomena] = useState<string[]>(filter.tags ?? []);
   const [serviceDropdownOpen, setServiceDropdownOpen] = useState(false);
@@ -740,14 +744,36 @@ export default function DiagnosisPage() {
                           </div>
                           <span>评分: {article.ratingAvg.toFixed(1)}</span>
                         </div>
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => navigate(`/article/${article.id}`)}
-                        >
-                          查看详情
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleFavorite(article.id);
+                            }}
+                            className={cn(
+                              'p-1.5 rounded-lg transition-all duration-200',
+                              favorites.some(f => f.articleId === article.id)
+                                ? 'text-red-500 bg-red-50'
+                                : 'text-slate-400 hover:text-red-500 hover:bg-red-50'
+                            )}
+                          >
+                            <Heart
+                              className={cn(
+                                'h-4 w-4 transition-transform',
+                                favorites.some(f => f.articleId === article.id) && 'fill-red-500 scale-110'
+                              )}
+                            />
+                          </button>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => navigate(`/article/${article.id}`)}
+                          >
+                            查看详情
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
                     </article>
                   );

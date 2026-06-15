@@ -1,10 +1,10 @@
-import { useState } from 'react';
 import { Eye, Heart, Clock, ChevronRight } from 'lucide-react';
 import type { Article, ServiceType } from '@/types';
 import { Badge } from '@/components/UI/Badge';
 import { Tag } from '@/components/UI/Tag';
 import StarRating from '@/components/UI/StarRating';
 import { cn } from '@/lib/utils';
+import { useFavoriteStore } from '@/store/favoriteStore';
 
 const serviceBadgeVariant: Record<ServiceType, 'default' | 'accent' | 'success' | 'warning' | 'danger'> = {
   order: 'accent',
@@ -54,11 +54,13 @@ function formatViewCount(count: number): string {
 }
 
 export default function ArticleCard({ article, onClick, className }: ArticleCardProps) {
-  const [isFavorited, setIsFavorited] = useState(false);
+  const favorites = useFavoriteStore(s => s.favorites);
+  const toggleFavorite = useFavoriteStore(s => s.toggleFavorite);
+  const isFav = favorites.some(f => f.articleId === article.id);
 
   const handleFavoriteClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsFavorited(!isFavorited);
+    toggleFavorite(article.id);
   };
 
   const summary = article.phenomenon.length > 100
@@ -127,7 +129,7 @@ export default function ArticleCard({ article, onClick, className }: ArticleCard
           onClick={handleFavoriteClick}
           className={cn(
             'p-1.5 rounded-lg transition-all duration-200',
-            isFavorited
+            isFav
               ? 'text-red-500 bg-red-50'
               : 'text-slate-400 hover:text-red-500 hover:bg-red-50'
           )}
@@ -135,7 +137,7 @@ export default function ArticleCard({ article, onClick, className }: ArticleCard
           <Heart
             className={cn(
               'h-4 w-4 transition-transform',
-              isFavorited && 'fill-red-500 scale-110'
+              isFav && 'fill-red-500 scale-110'
             )}
           />
         </button>

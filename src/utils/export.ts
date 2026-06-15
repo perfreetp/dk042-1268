@@ -1,4 +1,4 @@
-import type { Article } from '@/data/mockArticles';
+import type { Article, Step, Command, Incident, Case } from '@/data/mockArticles';
 import { serviceLabels } from '@/data/mockArticles';
 
 export interface ExportOptions {
@@ -40,6 +40,50 @@ function escapeMarkdown(text: string): string {
     .replace(/\n{3,}/g, '\n\n');
 }
 
+function formatAttention(attention: string | string[]): string {
+  if (Array.isArray(attention)) {
+    return attention.map(item => `> ⚠️ - ${escapeMarkdown(item)}`).join('\n');
+  }
+  return `> ⚠️ ${escapeMarkdown(attention)}`;
+}
+
+function getStepTitle(step: Step | { title?: string; description: string }, index: number): string {
+  if (step.title && step.title.trim()) {
+    return escapeMarkdown(step.title);
+  }
+  return `步骤 ${index + 1}`;
+}
+
+function getCommandContent(cmd: Command | { name: string; cmd?: string; content?: string; description: string }): string {
+  const cmdRecord = cmd as Record<string, unknown>;
+  return (cmdRecord.cmd ?? cmdRecord.content ?? '') as string;
+}
+
+function getIncidentDate(inc: Incident | { date?: string; happenedAt?: string; title?: string; impact?: string; duration?: string }): string {
+  const incRecord = inc as Record<string, unknown>;
+  return (incRecord.date ?? incRecord.happenedAt ?? '-') as string;
+}
+
+function getIncidentTitle(inc: Incident | { date?: string; happenedAt?: string; title?: string; impact?: string; duration?: string }): string {
+  const incRecord = inc as Record<string, unknown>;
+  return (incRecord.title ?? incRecord.impact ?? '未命名事故') as string;
+}
+
+function getIncidentImpact(inc: Incident | { date?: string; happenedAt?: string; title?: string; impact?: string; duration?: string }): string {
+  const incRecord = inc as Record<string, unknown>;
+  return (incRecord.impact ?? incRecord.title ?? '-') as string;
+}
+
+function getIncidentDuration(inc: Incident | { date?: string; happenedAt?: string; title?: string; impact?: string; duration?: string }): string {
+  const incRecord = inc as Record<string, unknown>;
+  return (incRecord.duration ?? '-') as string;
+}
+
+function getCaseField(c: Case | { title?: string; environment?: string; description?: string; solution?: string }, field: 'title' | 'environment' | 'description' | 'solution'): string {
+  const value = (c as Record<string, unknown>)[field];
+  return (value ?? '-') as string;
+}
+
 function generateArticleMarkdown(
   article: Article,
   index: number,
@@ -75,14 +119,14 @@ function generateArticleMarkdown(
 
   lines.push('### 注意事项');
   lines.push('');
-  lines.push(`> ⚠️ ${escapeMarkdown(article.attention)}`);
+  lines.push(formatAttention(article.attention as string | string[]));
   lines.push('');
 
   if (options.includeSteps && article.steps.length > 0) {
     lines.push('### 排查步骤');
     lines.push('');
     article.steps.forEach((step, i) => {
-      lines.push(`**步骤 ${i + 1}：${escapeMarkdown(step.title)}**`);
+      lines.push(`**步骤 ${i + 1}：${getStepTitle(step, i)}**`);
       lines.push('');
       lines.push(escapeMarkdown(step.description));
       lines.push('');
@@ -98,7 +142,7 @@ function generateArticleMarkdown(
       lines.push(`> ${escapeMarkdown(cmd.description)}`);
       lines.push('');
       lines.push('```bash');
-      lines.push(cmd.cmd);
+      lines.push(escapeMarkdown(getCommandContent(cmd)));
       lines.push('```');
       lines.push('');
     });
@@ -111,16 +155,16 @@ function generateArticleMarkdown(
     lines.push('| :--- | :--- | :--- | :--- |');
     article.incidents.forEach(inc => {
       lines.push(
-        `| ${escapeMarkdown(inc.date)} | ${escapeMarkdown(inc.title)} | ${escapeMarkdown(inc.impact)} | ${escapeMarkdown(inc.duration)} |`
+        `| ${escapeMarkdown(getIncidentDate(inc))} | ${escapeMarkdown(getIncidentTitle(inc))} | ${escapeMarkdown(getIncidentImpact(inc))} | ${escapeMarkdown(getIncidentDuration(inc))} |`
       );
     });
     lines.push('');
 
     article.incidents.forEach((inc, i) => {
-      lines.push(`#### ${i + 1}. ${escapeMarkdown(inc.title)} (${escapeMarkdown(inc.date)})`);
+      lines.push(`#### ${i + 1}. ${escapeMarkdown(getIncidentTitle(inc))} (${escapeMarkdown(getIncidentDate(inc))})`);
       lines.push('');
-      lines.push(`- **影响范围**：${escapeMarkdown(inc.impact)}`);
-      lines.push(`- **持续时间**：${escapeMarkdown(inc.duration)}`);
+      lines.push(`- **影响范围**：${escapeMarkdown(getIncidentImpact(inc))}`);
+      lines.push(`- **持续时间**：${escapeMarkdown(getIncidentDuration(inc))}`);
       lines.push('');
     });
   }
@@ -129,17 +173,17 @@ function generateArticleMarkdown(
     lines.push('### 典型案例');
     lines.push('');
     article.cases.forEach((c, i) => {
-      lines.push(`#### 案例 ${i + 1}：${escapeMarkdown(c.title)}`);
+      lines.push(`#### 案例 ${i + 1}：${escapeMarkdown(getCaseField(c, 'title'))}`);
       lines.push('');
-      lines.push(`- **环境**：${escapeMarkdown(c.environment)}`);
+      lines.push(`- **环境**：${escapeMarkdown(getCaseField(c, 'environment'))}`);
       lines.push('');
       lines.push('**问题描述**');
       lines.push('');
-      lines.push(escapeMarkdown(c.description));
+      lines.push(escapeMarkdown(getCaseField(c, 'description')));
       lines.push('');
       lines.push('**解决方案**');
       lines.push('');
-      lines.push(escapeMarkdown(c.solution));
+      lines.push(escapeMarkdown(getCaseField(c, 'solution')));
       lines.push('');
     });
   }
