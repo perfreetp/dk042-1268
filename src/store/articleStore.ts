@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Rating, ServiceType, SearchFilter } from '@/types';
+import type { Rating, ServiceType, SearchFilter, VersionVote } from '@/types';
 import { mockArticles, type Article, type Case } from '@/data/mockArticles';
 import { searchArticles, type SearchFilter as SearchFilterType } from '@/utils/search';
 import { storage, StorageKeys } from '@/utils/storage';
@@ -17,6 +17,7 @@ interface NewCaseInput extends Partial<Case> {
 }
 
 const STORAGE_KEY_ARTICLES = StorageKeys.KNOWLEDGE_ARTICLES;
+const STORAGE_KEY_VERSION_VOTES = StorageKeys.VERSION_VOTES;
 
 function loadArticles(): Article[] {
   const stored = storage.getItem<Article[]>(STORAGE_KEY_ARTICLES);
@@ -27,8 +28,24 @@ function persistArticles(articles: Article[]): void {
   storage.setItem(STORAGE_KEY_ARTICLES, articles);
 }
 
+function loadVersionVotes(): VersionVote[] {
+  const stored = storage.getItem<VersionVote[]>(STORAGE_KEY_VERSION_VOTES);
+  return stored ?? [];
+}
+
+function persistVersionVotes(votes: VersionVote[]): void {
+  storage.setItem(STORAGE_KEY_VERSION_VOTES, votes);
+}
+
+function generateId(): string {
+  return Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+}
+
+type VersionVoteSummary = Record<string, { applicable: number; notApplicable: number; rate: number }>;
+
 interface ArticleStoreState {
   articles: Article[];
+  versionVotes: VersionVote[];
   filter: SearchFilter;
   selectedArticleId: string | null;
   setFilter: (filter: Partial<SearchFilter>) => void;
@@ -42,10 +59,14 @@ interface ArticleStoreState {
   addNewArticle: (article: Article) => void;
   updateArticleFromContribution: (id: string, patch: Partial<Article>) => void;
   addCaseToArticle: (articleId: string, caseData: Case) => void;
+  submitVersionVote: (articleId: string, version: string, applicable: boolean, voter: string) => void;
+  getVersionVotes: (articleId: string) => VersionVote[];
+  getVersionVoteSummary: (articleId: string) => VersionVoteSummary;
 }
 
 export const useArticleStore = create<ArticleStoreState>((set, get) => ({
   articles: loadArticles(),
+  versionVotes: loadVersionVotes(),
   filter: {
     keyword: '',
     service: 'all',
@@ -168,5 +189,55 @@ export const useArticleStore = create<ArticleStoreState>((set, get) => ({
     });
     persistArticles(newArticles);
     set({ articles: newArticles });
+  },
+
+  submitVersionVote: (articleId, version, applicable, voter) => {
+    const { versionVotes } = get();
+    const existingIndex = versionVotes.findIndex(
+      (v) => v.articleId === articleId && v.version === version && v.voter === voter
+    );
+    const newVote: VersionVote = {
+      id: generateId(),
+      articleId,
+      version,
+      applicable,
+      voter,
+      votedAt: new Date().toISOString(),
+    };
+    let newVersionVotes: VersionVote[];
+    if (existingIndex >= 0) {
+      newVersionVotes = [...versionVotes];
+      newVersionVotes[existingIndex] = newVote;
+    } else {
+      newVersionVotes = [...versionVotes, newVote];
+    }
+    persistVersionVotes(newVersionVotes);
+    set({ versionVotes: newVersionVotes });
+  },
+
+  getVersionVotes: (articleId) => {
+    const { versionVotes } = get();
+    return versionVotes.filter((v) => v.articleId === articleId);
+  },
+
+  getVersionVoteSummary: (articleId) => {
+    const votes = get().getVersionVotes(articleId);
+    const summary: VersionVoteSummary = {};
+    for (const vote of votes) {
+      if (!summary[vote.version]) {
+        summary[vote.version] = { applicable: 0, notApplicable: 0, rate: 0 };
+      }
+      if (vote.applicable) {
+        summary[vote.version].applicable += 1;
+      } else {
+        summary[vote.version].notApplicable += 1;
+      }
+    }
+    for (const version of Object.keys(summary)) {
+      const s = summary[version];
+      const total = s.applicable + s.notApplicable;
+      s.rate = total > 0 ? Number((s.applicable / total).toFixed(2)) : 0;
+    }
+    return summary;
   }
 }));

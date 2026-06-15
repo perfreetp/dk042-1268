@@ -179,7 +179,7 @@ function getMatchScoreColor(score: number): string {
 
 export default function DiagnosisPage() {
   const navigate = useNavigate();
-  const { filter, setFilter, getFilteredArticles } = useArticleStore();
+  const { filter, setFilter, getFilteredArticles, getVersionVoteSummary } = useArticleStore();
   const favorites = useFavoriteStore(s => s.favorites);
   const toggleFavorite = useFavoriteStore(s => s.toggleFavorite);
 
@@ -693,6 +693,34 @@ export default function DiagnosisPage() {
                           ))}
                         </div>
                       )}
+
+                      {/* Version Applicability Reference */}
+                      {(() => {
+                        const summary = getVersionVoteSummary(article.id);
+                        const versionEntries = Object.entries(summary)
+                          .filter(([, s]) => s.applicable + s.notApplicable >= 1)
+                          .sort((a, b) => (b[1].applicable + b[1].notApplicable) - (a[1].applicable + a[1].notApplicable))
+                          .slice(0, 3);
+                        if (versionEntries.length === 0) return null;
+                        return (
+                          <div className="flex flex-wrap items-center gap-2 mb-4">
+                            <span className="text-xs text-slate-500">版本适用性参考:</span>
+                            {versionEntries.map(([version, s]) => {
+                              const rate = Math.round(s.rate * 100);
+                              return (
+                                <span
+                                  key={version}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                >
+                                  <span className="font-mono">{version}</span>
+                                  <span className="font-semibold">{rate}%</span>
+                                  <CheckCircle2 className="h-3 w-3" />
+                                </span>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
 
                       {/* Error Codes Tags */}
                       {article.errorCodes.length > 0 && (

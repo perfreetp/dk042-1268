@@ -7,6 +7,7 @@ const navItems = [
   { to: '/diagnosis', label: '故障诊断' },
   { to: '/favorites', label: '收藏夹' },
   { to: '/review', label: '贡献审核' },
+  { to: '/dashboard', label: '运营看板' },
 ];
 
 export default function Header() {

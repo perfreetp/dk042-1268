@@ -12,7 +12,8 @@ import {
   Eye,
   Clock,
   Check,
-  X
+  X,
+  Info
 } from 'lucide-react';
 import MainLayout from '@/components/Layout/MainLayout';
 import { Badge } from '@/components/UI/Badge';
@@ -56,6 +57,7 @@ const tocItems: TocItem[] = [
   { id: 'steps', label: '排查步骤' },
   { id: 'commands', label: '常用命令' },
   { id: 'incidents', label: '关联事故' },
+  { id: 'versionVotes', label: '版本投票' },
   { id: 'cases', label: '补充案例' },
 ];
 
@@ -102,6 +104,9 @@ export default function ArticleDetailPage() {
   const incrementViewCount = useArticleStore((s) => s.incrementViewCount);
   const addRating = useArticleStore((s) => s.addRating);
   const addCase = useArticleStore((s) => s.addCase);
+  const submitVersionVote = useArticleStore((s) => s.submitVersionVote);
+  const getVersionVoteSummary = useArticleStore((s) => s.getVersionVoteSummary);
+  const getVersionVotes = useArticleStore((s) => s.getVersionVotes);
 
   const toggleFavorite = useFavoriteStore((s) => s.toggleFavorite);
   const isFavorite = useFavoriteStore((s) => s.isFavorite);
@@ -424,7 +429,97 @@ export default function ArticleDetailPage() {
             </div>
           </section>
 
-          {/* g) 补充案例列表 */}
+          {/* g) 版本适用性投票 */}
+          <section id="versionVotes" ref={(el) => (sectionRefs.current.versionVotes = el)}>
+            <div className="flex items-center gap-2 mb-4">
+              <h3 className="text-lg font-semibold text-slate-900">版本适用性投票</h3>
+              <div className="relative group">
+                <Info className="h-4 w-4 text-slate-400 cursor-help" />
+                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-56 px-3 py-2 rounded-lg bg-slate-800 text-white text-xs opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 shadow-lg">
+                  值班同学投票标记此方案在各版本的适用性
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-800" />
+                </div>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+              <div className="divide-y divide-slate-100">
+                {article.versions.map((version) => {
+                  const summary = id ? getVersionVoteSummary(id) : {};
+                  const votes = id ? getVersionVotes(id) : [];
+                  const versionSummary = summary[version] ?? { applicable: 0, notApplicable: 0, rate: 0 };
+                  const userVote = votes.find(v => v.version === version && v.voter === '当前用户');
+                  const total = versionSummary.applicable + versionSummary.notApplicable;
+                  const ratePercent = total > 0 ? Math.round(versionSummary.rate * 100) : 0;
+                  const handleVote = (applicable: boolean) => {
+                    if (!id) return;
+                    submitVersionVote(id, version, applicable, '当前用户');
+                  };
+                  return (
+                    <div key={version} className="px-5 py-4 flex flex-wrap items-center gap-4">
+                      <Badge variant="default" className="!px-3 !py-1.5 !text-sm font-semibold">
+                        {version}
+                      </Badge>
+                      <div className="flex-1 min-w-[200px]">
+                        <div className="flex items-center justify-between mb-1.5 text-xs">
+                          <div className="flex items-center gap-3">
+                            <span className="text-emerald-600 font-semibold">
+                              ✓ {versionSummary.applicable}
+                            </span>
+                            <span className="text-red-600 font-semibold">
+                              ✗ {versionSummary.notApplicable}
+                            </span>
+                          </div>
+                          <span className="text-slate-500">
+                            适用率 <span className="font-semibold text-slate-700">{ratePercent}%</span>
+                          </span>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden flex">
+                          <div
+                            className="h-full bg-gradient-to-r from-emerald-400 to-green-500 transition-all duration-500 ease-out"
+                            style={{ width: `${ratePercent}%` }}
+                          />
+                          <div
+                            className="h-full bg-gradient-to-r from-red-400 to-red-500 transition-all duration-500 ease-out"
+                            style={{ width: `${100 - ratePercent}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleVote(true)}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium border transition-all',
+                            userVote?.applicable === true
+                              ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm shadow-emerald-500/20'
+                              : 'bg-white text-emerald-600 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-400'
+                          )}
+                        >
+                          <Check className="h-4 w-4" />
+                          适用
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleVote(false)}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium border transition-all',
+                            userVote?.applicable === false
+                              ? 'bg-red-500 text-white border-red-500 shadow-sm shadow-red-500/20'
+                              : 'bg-white text-red-600 border-red-300 hover:bg-red-50 hover:border-red-400'
+                          )}
+                        >
+                          <X className="h-4 w-4" />
+                          不适用
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+
+          {/* h) 补充案例列表 */}
           <section id="cases" ref={(el) => (sectionRefs.current.cases = el)}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-slate-900">补充案例</h3>

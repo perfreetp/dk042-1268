@@ -128,3 +128,12 @@ export interface InvalidFeedback {
   handleRemark?: string;
   handledAt?: string;
 }
+
+export interface VersionVote {
+  id: string;
+  articleId: string;
+  version: string;
+  applicable: boolean;
+  voter: string;
+  votedAt: string;
+}

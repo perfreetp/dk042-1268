@@ -86,7 +86,8 @@ export const StorageKeys = {
   SEARCH_HISTORY: 'search_history',
   SELECTED_ARTICLES: 'selected_articles',
   USER_SETTINGS: 'user_settings',
-  KNOWLEDGE_ARTICLES: 'knowledge_articles'
+  KNOWLEDGE_ARTICLES: 'knowledge_articles',
+  VERSION_VOTES: 'version_votes'
 } as const;
 
 export type StorageKeyType = typeof StorageKeys[keyof typeof StorageKeys];

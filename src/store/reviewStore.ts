@@ -1,8 +1,25 @@
 import { create } from 'zustand';
-import type { Contribution, ReviewRecord, InvalidFeedback, FeedbackStatus } from '@/types';
+import type { Contribution, ReviewRecord, InvalidFeedback, FeedbackStatus, ServiceType } from '@/types';
 import { storage } from '@/utils/storage';
 import { useArticleStore } from '@/store/articleStore';
-import type { Article, Case } from '@/data/mockArticles';
+import type { Article, Case, Step, Command } from '@/data/mockArticles';
+
+export interface EditedArticleContent {
+  service?: ServiceType;
+  errorCodes?: string[];
+  versions?: string[];
+  tags?: string[];
+  title?: string;
+  phenomenon?: string;
+  attention?: string;
+  steps?: Step[];
+  commands?: Command[];
+}
+
+export interface EditedContributionData {
+  articleData?: EditedArticleContent;
+  patch?: EditedArticleContent;
+}
 
 const STORAGE_KEY_CONTRIBUTIONS = 'review_contributions';
 const STORAGE_KEY_RECORDS = 'review_records';
@@ -144,7 +161,7 @@ interface ReviewStoreState {
   reviewRecords: ReviewRecord[];
   feedbacks: InvalidFeedback[];
   submitContribution: (data: Omit<Contribution, 'id' | 'status' | 'createdAt'>) => void;
-  approveContribution: (id: string, reviewer: string, remark?: string) => void;
+  approveContribution: (id: string, reviewer: string, remark?: string, editedContent?: EditedContributionData) => void;
   rejectContribution: (id: string, reviewer: string, remark: string) => void;
   getPendingContributions: () => Contribution[];
   getContributionHistory: () => Array<Contribution & { reviewRecord?: ReviewRecord }>;
@@ -173,7 +190,7 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
     set({ contributions: newContributions });
   },
 
-  approveContribution: (id, reviewer, remark) => {
+  approveContribution: (id, reviewer, remark, editedContent) => {
     const { contributions, reviewRecords } = get();
     const contribution = contributions.find((c) => c.id === id);
     const newContributions = contributions.map((c) =>
@@ -193,11 +210,40 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
       const articleStore = useArticleStore.getState();
 
       if (contribution.type === 'new_article') {
-        const errorCodeRegex = /[A-Z]{2,4}-\d{4,5}/g;
-        const errorCodes = contribution.summary.match(errorCodeRegex) ?? [];
-        const tagKeywords = ['超时', '错误', '异常', '性能', '安全', '连接', '缓存', '数据库', '支付', '订单', '用户', '消息', '登录', '状态'];
-        const tags = tagKeywords.filter((kw) => contribution.summary.includes(kw));
-        const phenomenon = contribution.summary.slice(0, 200);
+        const edited = editedContent?.articleData;
+        let errorCodes: string[];
+        let tags: string[];
+        let phenomenon: string;
+        let service: ServiceType;
+        let versions: string[];
+        let title: string;
+        let attention: string;
+        let steps: Step[];
+        let commands: Command[];
+
+        if (edited) {
+          errorCodes = edited.errorCodes ?? [];
+          tags = edited.tags ?? [];
+          phenomenon = edited.phenomenon ?? contribution.summary.slice(0, 200);
+          service = edited.service ?? 'order';
+          versions = edited.versions ?? ['v2.x'];
+          title = edited.title ?? contribution.title.replace(/^新增：/, '');
+          attention = edited.attention ?? '';
+          steps = edited.steps ?? [];
+          commands = edited.commands ?? [];
+        } else {
+          const errorCodeRegex = /[A-Z]{2,4}-\d{4,5}/g;
+          errorCodes = contribution.summary.match(errorCodeRegex) ?? [];
+          const tagKeywords = ['超时', '错误', '异常', '性能', '安全', '连接', '缓存', '数据库', '支付', '订单', '用户', '消息', '登录', '状态'];
+          tags = tagKeywords.filter((kw) => contribution.summary.includes(kw));
+          phenomenon = contribution.summary.slice(0, 200);
+          service = 'order';
+          versions = ['v2.x'];
+          title = contribution.title.replace(/^新增：/, '');
+          attention = '';
+          steps = [];
+          commands = [];
+        }
 
         const existingIds = articleStore.articles
           .map((a) => parseInt(a.id.replace('ART-', ''), 10))
@@ -207,12 +253,12 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
 
         const newArticle: Article = {
           id: newId,
-          title: contribution.title.replace(/^新增：/, ''),
-          service: 'order',
+          title,
+          service: service as Article['service'],
           errorCodes,
-          versions: ['v2.x'],
+          versions,
           phenomenon,
-          attention: '',
+          attention,
           tags,
           viewCount: 0,
           ratingAvg: 0,
@@ -220,8 +266,8 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           author: contribution.submitter,
-          steps: [],
-          commands: [],
+          steps,
+          commands,
           incidents: [],
           cases: []
         };
@@ -229,17 +275,36 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
       } else if (contribution.type === 'update_article' && contribution.articleId) {
         const article = articleStore.getArticleById(contribution.articleId);
         if (article) {
-          const newTitle = contribution.title.replace(/^更新：/, '');
+          const edited = editedContent?.patch;
           const now = new Date().toISOString();
-          const updateRecord = `[${now}] 审核通过更新：${contribution.summary} (审核人：${reviewer})`;
-          const newAttention = article.attention
-            ? `${article.attention}\n${updateRecord}`
-            : updateRecord;
-          articleStore.updateArticle(contribution.articleId, {
-            updatedAt: now,
-            title: newTitle,
-            attention: newAttention
-          });
+
+          if (edited) {
+            const patchData: Partial<Article> = {
+              updatedAt: now
+            };
+            if (edited.service) patchData.service = edited.service as Article['service'];
+            if (edited.errorCodes) patchData.errorCodes = edited.errorCodes;
+            if (edited.versions) patchData.versions = edited.versions;
+            if (edited.tags) patchData.tags = edited.tags;
+            if (edited.title) patchData.title = edited.title;
+            if (edited.phenomenon) patchData.phenomenon = edited.phenomenon;
+            if (edited.attention !== undefined) patchData.attention = edited.attention;
+            if (edited.steps) patchData.steps = edited.steps;
+            if (edited.commands) patchData.commands = edited.commands;
+
+            articleStore.updateArticle(contribution.articleId, patchData);
+          } else {
+            const newTitle = contribution.title.replace(/^更新：/, '');
+            const updateRecord = `[${now}] 审核通过更新：${contribution.summary} (审核人：${reviewer})`;
+            const newAttention = article.attention
+              ? `${article.attention}\n${updateRecord}`
+              : updateRecord;
+            articleStore.updateArticle(contribution.articleId, {
+              updatedAt: now,
+              title: newTitle,
+              attention: newAttention
+            });
+          }
         }
       } else if (contribution.type === 'new_case' && contribution.articleId) {
         const caseObj: Case = {

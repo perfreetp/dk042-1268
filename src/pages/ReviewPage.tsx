@@ -23,14 +23,17 @@ import {
   ThumbsDown,
   MessageSquare,
   ShieldAlert,
-  ListTodo
+  ListTodo,
+  X,
+  Trash2
 } from 'lucide-react';
 import MainLayout from '@/components/Layout/MainLayout';
 import Badge from '@/components/UI/Badge';
 import Button from '@/components/UI/Button';
 import Modal from '@/components/UI/Modal';
-import { useReviewStore } from '@/store/reviewStore';
-import type { Contribution, ContributionType, ReviewRecord, InvalidFeedback, FeedbackStatus } from '@/types';
+import { useReviewStore, type EditedContributionData, type EditedArticleContent } from '@/store/reviewStore';
+import type { Contribution, ContributionType, ReviewRecord, InvalidFeedback, FeedbackStatus, ServiceType } from '@/types';
+import type { Step, Command } from '@/data/mockArticles';
 import { cn } from '@/lib/utils';
 
 type TabKey = 'pending' | 'history' | 'feedback';
@@ -160,6 +163,93 @@ const FEEDBACK_STATUS_LABELS: Record<FeedbackStatus, string> = {
 
 type FeedbackSubTab = 'pending' | 'history';
 
+const SERVICE_LABELS: Record<ServiceType, string> = {
+  order: '订单服务',
+  payment: '支付服务',
+  user: '用户服务',
+  message: '消息服务',
+  search: '搜索服务',
+  gateway: '网关服务',
+  database: '数据库',
+  cache: '缓存'
+};
+
+const SERVICE_OPTIONS: ServiceType[] = ['order', 'payment', 'user', 'message', 'search', 'gateway', 'database', 'cache'];
+
+interface TagInputProps {
+  label: string;
+  tags: string[];
+  onChange: (tags: string[]) => void;
+  placeholder?: string;
+}
+
+function TagInput({ label, tags, onChange, placeholder }: TagInputProps) {
+  const [inputValue, setInputValue] = useState('');
+
+  const addTag = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed && !tags.includes(trimmed)) {
+      onChange([...tags, trimmed]);
+    }
+    setInputValue('');
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (inputValue.includes(',')) {
+        inputValue.split(',').forEach(v => addTag(v));
+      } else {
+        addTag(inputValue);
+      }
+    } else if (e.key === 'Backspace' && !inputValue && tags.length > 0) {
+      onChange(tags.slice(0, -1));
+    }
+  };
+
+  const handleBlur = () => {
+    if (inputValue) {
+      if (inputValue.includes(',')) {
+        inputValue.split(',').forEach(v => addTag(v));
+      } else {
+        addTag(inputValue);
+      }
+    }
+  };
+
+  return (
+    <div>
+      <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 focus-within:border-teal-500 focus-within:ring-2 focus-within:ring-teal-500/20 min-h-[40px]">
+        {tags.map((tag, idx) => (
+          <span
+            key={idx}
+            className="inline-flex items-center gap-1 rounded-md bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700 ring-1 ring-inset ring-teal-600/20"
+          >
+            {tag}
+            <button
+              type="button"
+              onClick={() => onChange(tags.filter((_, i) => i !== idx))}
+              className="text-teal-500 hover:text-teal-700"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+        <input
+          type="text"
+          value={inputValue}
+          onChange={e => setInputValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+          placeholder={tags.length === 0 ? placeholder : ''}
+          className="flex-1 min-w-[80px] border-0 bg-transparent text-sm placeholder:text-slate-400 focus:outline-none focus:ring-0"
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function ReviewPage() {
   const {
     contributions,
@@ -168,13 +258,9 @@ export default function ReviewPage() {
     submitContribution,
     approveContribution,
     rejectContribution,
-    getPendingContributions,
-    getContributionHistory,
     submitFeedback,
     resolveFeedback,
-    rejectFeedback,
-    getPendingFeedbacks,
-    getFeedbackHistory
+    rejectFeedback
   } = useReviewStore();
 
   const [activeTab, setActiveTab] = useState<TabKey>('pending');
@@ -203,13 +289,29 @@ export default function ReviewPage() {
   const [feedbackHandleRemark, setFeedbackHandleRemark] = useState('');
   const [feedbackQuickRemarks, setFeedbackQuickRemarks] = useState<Record<string, string>>({});
 
-  const pendingFeedbackList = useMemo(() => getPendingFeedbacks(), [getPendingFeedbacks]);
-  const feedbackHistoryList = useMemo(() => getFeedbackHistory(), [getFeedbackHistory]);
+  const [editedContent, setEditedContent] = useState<EditedArticleContent>({});
+
+  const pendingFeedbackList = useMemo(
+    () => feedbacks
+      .filter(f => f.status === 'pending')
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [feedbacks]
+  );
+  const feedbackHistoryList = useMemo(
+    () => feedbacks
+      .filter(f => f.status !== 'pending')
+      .sort((a, b) => {
+        const dateA = a.handledAt ?? a.createdAt;
+        const dateB = b.handledAt ?? b.createdAt;
+        return new Date(dateB).getTime() - new Date(dateA).getTime();
+      }),
+    [feedbacks]
+  );
 
   const pendingFeedbackCount = pendingFeedbackList.length;
 
   const pendingList = useMemo(() => {
-    let list = getPendingContributions();
+    let list = contributions.filter(c => c.status === 'pending');
     if (typeFilter !== 'all') {
       list = list.filter(c => c.type === typeFilter);
     }
@@ -222,10 +324,16 @@ export default function ReviewPage() {
       list = list.filter(c => new Date(c.createdAt).getTime() < end);
     }
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [getPendingContributions, typeFilter, dateRange]);
+  }, [contributions, typeFilter, dateRange]);
 
   const historyList = useMemo(() => {
-    let list = getContributionHistory();
+    const historyWithRecords = contributions
+      .filter(c => c.status !== 'pending')
+      .map(c => ({
+        ...c,
+        reviewRecord: reviewRecords.find(r => r.contributionId === c.id)
+      }));
+    let list = historyWithRecords;
     if (typeFilter !== 'all') {
       list = list.filter(c => c.type === typeFilter);
     }
@@ -244,7 +352,7 @@ export default function ReviewPage() {
       return historySortAsc ? -diff : diff;
     });
     return sorted;
-  }, [getContributionHistory, typeFilter, dateRange, historySortAsc]);
+  }, [contributions, reviewRecords, typeFilter, dateRange, historySortAsc]);
 
   const stats = useMemo(() => {
     const pending = contributions.filter(c => c.status === 'pending').length;
@@ -258,22 +366,53 @@ export default function ReviewPage() {
     const rate = totalReviewed > 0 ? Math.round((approvedCount / totalReviewed) * 100) : 0;
     const trend = rate >= 70 ? 'up' : rate >= 40 ? 'flat' : 'down';
     return { pending, monthApproved, rate, trend };
-  }, [contributions, reviewRecords]);
+  }, [contributions, reviewRecords, feedbacks]);
 
   const pageSize = 10;
   const totalPages = Math.max(1, Math.ceil(historyList.length / pageSize));
   const pagedHistory = historyList.slice((historyPage - 1) * pageSize, historyPage * pageSize);
 
+  function initializeEditedContent(contribution: Contribution) {
+    if (contribution.type === 'new_article') {
+      setEditedContent({
+        service: 'order',
+        errorCodes: [],
+        versions: ['v2.x'],
+        tags: [],
+        steps: [],
+        commands: [],
+        title: contribution.title,
+        phenomenon: contribution.summary,
+        attention: ''
+      });
+    } else if (contribution.type === 'update_article') {
+      setEditedContent({
+        title: contribution.title,
+        phenomenon: contribution.summary,
+        errorCodes: [],
+        versions: [],
+        tags: [],
+        steps: [],
+        commands: [],
+        attention: ''
+      });
+    } else {
+      setEditedContent({});
+    }
+  }
+
   function openDetail(contribution: Contribution & { reviewRecord?: ReviewRecord }) {
     setSelectedContribution(contribution);
     setReviewRemark('');
+    initializeEditedContent(contribution);
     setDetailModalOpen(true);
   }
 
-  function handleApprove(id: string, remark?: string) {
-    approveContribution(id, CURRENT_REVIEWER, remark);
+  function handleApprove(id: string, remark?: string, editedData?: EditedContributionData) {
+    approveContribution(id, CURRENT_REVIEWER, remark, editedData);
     setDetailModalOpen(false);
     setSelectedContribution(null);
+    setEditedContent({});
     setQuickRemark(prev => {
       const next = { ...prev };
       delete next[id];
@@ -286,6 +425,7 @@ export default function ReviewPage() {
     rejectContribution(id, CURRENT_REVIEWER, remark);
     setDetailModalOpen(false);
     setSelectedContribution(null);
+    setEditedContent({});
     setQuickRemark(prev => {
       const next = { ...prev };
       delete next[id];
@@ -314,9 +454,18 @@ export default function ReviewPage() {
     const rows = [
       ['贡献ID', '类型', '标题', '提交人', '提交时间', '状态', '审核人', '审核结果', '审核时间', '审核备注']
     ];
+    const historyWithRecords = contributions
+      .filter(c => c.status !== 'pending')
+      .map(c => ({
+        ...c,
+        reviewRecord: reviewRecords.find(r => r.contributionId === c.id)
+      }));
+    const pendingWithRecords = contributions
+      .filter(c => c.status === 'pending')
+      .map(c => ({ ...c, reviewRecord: undefined }));
     const combined: Array<Contribution & { reviewRecord?: ReviewRecord }> = [
-      ...getContributionHistory(),
-      ...getPendingContributions().map(c => ({ ...c, reviewRecord: undefined }))
+      ...historyWithRecords,
+      ...pendingWithRecords
     ];
     combined.forEach(c => {
       rows.push([
@@ -1115,13 +1264,29 @@ export default function ReviewPage() {
               <div className="flex items-center gap-2 sm:shrink-0">
                 <Button
                   variant="danger"
-                  onClick={() => selectedContribution && handleReject(selectedContribution.id, reviewRemark)}
+                  onClick={() => {
+                    if (selectedContribution) {
+                      handleReject(selectedContribution.id, reviewRemark);
+                    }
+                  }}
                   disabled={!reviewRemark.trim()}
                 >
                   <XCircle className="h-4 w-4" />
                   审核驳回
                 </Button>
-                <Button onClick={() => selectedContribution && handleApprove(selectedContribution.id, reviewRemark)}>
+                <Button
+                  onClick={() => {
+                    if (selectedContribution) {
+                      let editedData: EditedContributionData | undefined;
+                      if (selectedContribution.type === 'new_article') {
+                        editedData = { articleData: editedContent };
+                      } else if (selectedContribution.type === 'update_article') {
+                        editedData = { patch: editedContent };
+                      }
+                      handleApprove(selectedContribution.id, reviewRemark, editedData);
+                    }
+                  }}
+                >
                   <CheckCircle2 className="h-4 w-4" />
                   审核通过
                 </Button>
@@ -1201,41 +1366,276 @@ export default function ReviewPage() {
               </p>
             </div>
 
-            <div>
-              <h4 className="mb-3 text-sm font-semibold text-slate-900">内容对比</h4>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <div className="rounded-lg border border-slate-200 bg-slate-50">
-                  <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
-                    <span className="text-xs font-medium text-slate-500">原文内容</span>
-                    <Badge variant="default">Original</Badge>
+            {(selectedContribution.type === 'new_article' || selectedContribution.type === 'update_article') && selectedContribution.status === 'pending' ? (
+              <div>
+                <h4 className="mb-3 text-sm font-semibold text-slate-900">内容编辑（审核人可调整后通过）</h4>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50">
+                    <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+                      <span className="text-xs font-medium text-slate-500">原文内容 / 提交摘要</span>
+                      <Badge variant="default">Original</Badge>
+                    </div>
+                    <div className="h-96 overflow-auto p-4 text-sm leading-relaxed text-slate-600 whitespace-pre-wrap">
+                      {originalContent || <span className="text-slate-400">（新文章无原文）</span>}
+                    </div>
                   </div>
-                  <div className="h-80 overflow-auto p-4 text-sm leading-relaxed text-slate-600 whitespace-pre-wrap">
-                    {originalContent || <span className="text-slate-400">（无原文内容）</span>}
-                  </div>
-                </div>
 
-                <div className="rounded-lg border-2 border-green-300 bg-green-50/30">
-                  <div className="flex items-center justify-between border-b border-green-200 bg-green-50 px-4 py-2">
-                    <span className="text-xs font-medium text-green-700">提议修改内容</span>
-                    <Badge variant="success">Proposed</Badge>
-                  </div>
-                  <div className="h-80 overflow-auto p-4">
-                    <DiffRenderer segments={diffSegments} />
+                  <div className="rounded-lg border-2 border-green-300 bg-green-50/30">
+                    <div className="flex items-center justify-between border-b border-green-200 bg-green-50 px-4 py-2">
+                      <span className="text-xs font-medium text-green-700">
+                        {selectedContribution.type === 'new_article' ? '新文章内容编辑' : '更新内容编辑（Patch）'}
+                      </span>
+                      <Badge variant="success">Editable</Badge>
+                    </div>
+                    <div className="h-96 overflow-auto p-4 space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">服务</label>
+                          <select
+                            value={editedContent.service ?? 'order'}
+                            onChange={e => setEditedContent(prev => ({ ...prev, service: e.target.value as ServiceType }))}
+                            className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                          >
+                            {SERVICE_OPTIONS.map(svc => (
+                              <option key={svc} value={svc}>{SERVICE_LABELS[svc]}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">标题</label>
+                          <input
+                            type="text"
+                            value={editedContent.title ?? ''}
+                            onChange={e => setEditedContent(prev => ({ ...prev, title: e.target.value }))}
+                            placeholder="文章标题"
+                            className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                          />
+                        </div>
+                      </div>
+
+                      <TagInput
+                        label="错误码（逗号或回车添加）"
+                        tags={editedContent.errorCodes ?? []}
+                        onChange={tags => setEditedContent(prev => ({ ...prev, errorCodes: tags }))}
+                        placeholder="例如：ORD-5001"
+                      />
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <TagInput
+                          label="适用版本"
+                          tags={editedContent.versions ?? []}
+                          onChange={tags => setEditedContent(prev => ({ ...prev, versions: tags }))}
+                          placeholder="例如：v2.1.0"
+                        />
+                        <TagInput
+                          label="标签"
+                          tags={editedContent.tags ?? []}
+                          onChange={tags => setEditedContent(prev => ({ ...prev, tags: tags }))}
+                          placeholder="例如：性能,高可用"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-slate-700">现象 / 摘要</label>
+                        <textarea
+                          rows={3}
+                          value={editedContent.phenomenon ?? ''}
+                          onChange={e => setEditedContent(prev => ({ ...prev, phenomenon: e.target.value }))}
+                          placeholder="问题现象描述"
+                          className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 block text-sm font-medium text-slate-700">注意事项（每行一条）</label>
+                        <textarea
+                          rows={2}
+                          value={editedContent.attention ?? ''}
+                          onChange={e => setEditedContent(prev => ({ ...prev, attention: e.target.value }))}
+                          placeholder="处理注意事项..."
+                          className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                        />
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm font-medium text-slate-700">排查步骤</label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditedContent(prev => ({
+                              ...prev,
+                              steps: [...(prev.steps ?? []), { title: '', description: '' }]
+                            }))}
+                          >
+                            <Plus className="h-4 w-4" />
+                            添加步骤
+                          </Button>
+                        </div>
+                        <div className="space-y-2">
+                          {(editedContent.steps ?? []).map((step, idx) => (
+                            <div key={idx} className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="text-xs font-medium text-teal-600 mt-1">步骤 {idx + 1}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditedContent(prev => ({
+                                    ...prev,
+                                    steps: (prev.steps ?? []).filter((_, i) => i !== idx)
+                                  }))}
+                                  className="text-slate-400 hover:text-rose-600"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                              <input
+                                type="text"
+                                value={step.title}
+                                onChange={e => setEditedContent(prev => {
+                                  const newSteps = [...(prev.steps ?? [])];
+                                  newSteps[idx] = { ...newSteps[idx], title: e.target.value };
+                                  return { ...prev, steps: newSteps };
+                                })}
+                                placeholder="步骤标题"
+                                className="w-full h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                              />
+                              <textarea
+                                rows={2}
+                                value={step.description}
+                                onChange={e => setEditedContent(prev => {
+                                  const newSteps = [...(prev.steps ?? [])];
+                                  newSteps[idx] = { ...newSteps[idx], description: e.target.value };
+                                  return { ...prev, steps: newSteps };
+                                })}
+                                placeholder="步骤详细说明"
+                                className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                              />
+                            </div>
+                          ))}
+                          {(editedContent.steps ?? []).length === 0 && (
+                            <div className="text-center py-4 text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg">
+                              暂无步骤，点击上方按钮添加
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm font-medium text-slate-700">常用命令</label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditedContent(prev => ({
+                              ...prev,
+                              commands: [...(prev.commands ?? []), { name: '', cmd: '', description: '' }]
+                            }))}
+                          >
+                            <Plus className="h-4 w-4" />
+                            添加命令
+                          </Button>
+                        </div>
+                        <div className="space-y-2">
+                          {(editedContent.commands ?? []).map((cmd, idx) => (
+                            <div key={idx} className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="text-xs font-medium text-blue-600 mt-1">命令 {idx + 1}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditedContent(prev => ({
+                                    ...prev,
+                                    commands: (prev.commands ?? []).filter((_, i) => i !== idx)
+                                  }))}
+                                  className="text-slate-400 hover:text-rose-600"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                              <input
+                                type="text"
+                                value={cmd.name}
+                                onChange={e => setEditedContent(prev => {
+                                  const newCmds = [...(prev.commands ?? [])];
+                                  newCmds[idx] = { ...newCmds[idx], name: e.target.value };
+                                  return { ...prev, commands: newCmds };
+                                })}
+                                placeholder="命令名称（如：查看错误日志）"
+                                className="w-full h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                              />
+                              <input
+                                type="text"
+                                value={cmd.cmd}
+                                onChange={e => setEditedContent(prev => {
+                                  const newCmds = [...(prev.commands ?? [])];
+                                  newCmds[idx] = { ...newCmds[idx], cmd: e.target.value };
+                                  return { ...prev, commands: newCmds };
+                                })}
+                                placeholder="命令内容"
+                                className="w-full h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20 font-mono"
+                              />
+                              <textarea
+                                rows={2}
+                                value={cmd.description}
+                                onChange={e => setEditedContent(prev => {
+                                  const newCmds = [...(prev.commands ?? [])];
+                                  newCmds[idx] = { ...newCmds[idx], description: e.target.value };
+                                  return { ...prev, commands: newCmds };
+                                })}
+                                placeholder="命令说明"
+                                className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                              />
+                            </div>
+                          ))}
+                          {(editedContent.commands ?? []).length === 0 && (
+                            <div className="text-center py-4 text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg">
+                              暂无命令，点击上方按钮添加
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <>
+                <div>
+                  <h4 className="mb-3 text-sm font-semibold text-slate-900">内容对比</h4>
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50">
+                      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+                        <span className="text-xs font-medium text-slate-500">原文内容</span>
+                        <Badge variant="default">Original</Badge>
+                      </div>
+                      <div className="h-80 overflow-auto p-4 text-sm leading-relaxed text-slate-600 whitespace-pre-wrap">
+                        {originalContent || <span className="text-slate-400">（无原文内容）</span>}
+                      </div>
+                    </div>
 
-            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-              <div className="text-xs text-amber-800">
-                <p className="font-medium">图例说明</p>
-                <p className="mt-1">
-                  <span className="inline-block rounded bg-green-100 px-1 text-green-800 underline">绿色下划线</span> 表示新增内容，
-                  <span className="ml-1 inline-block rounded bg-red-100 px-1 text-red-700 line-through">红色删除线</span> 表示删除内容。
-                </p>
-              </div>
-            </div>
+                    <div className="rounded-lg border-2 border-green-300 bg-green-50/30">
+                      <div className="flex items-center justify-between border-b border-green-200 bg-green-50 px-4 py-2">
+                        <span className="text-xs font-medium text-green-700">提议修改内容</span>
+                        <Badge variant="success">Proposed</Badge>
+                      </div>
+                      <div className="h-80 overflow-auto p-4">
+                        <DiffRenderer segments={diffSegments} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <div className="text-xs text-amber-800">
+                    <p className="font-medium">图例说明</p>
+                    <p className="mt-1">
+                      <span className="inline-block rounded bg-green-100 px-1 text-green-800 underline">绿色下划线</span> 表示新增内容，
+                      <span className="ml-1 inline-block rounded bg-red-100 px-1 text-red-700 line-through">红色删除线</span> 表示删除内容。
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
       </Modal>
