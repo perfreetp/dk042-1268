@@ -83,6 +83,77 @@ const TIME_RANGE_OPTIONS: Array<{ value: TimeRange; label: string }> = [
   { value: 'all', label: '全部' }
 ];
 
+function getTimeRangeStart(range: TimeRange): Date {
+  const now = new Date();
+  const start = new Date(now);
+
+  switch (range) {
+    case 'today':
+      start.setHours(0, 0, 0, 0);
+      break;
+    case 'week': {
+      const dayOfWeek = start.getDay();
+      const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      start.setDate(start.getDate() + diffToMonday);
+      start.setHours(0, 0, 0, 0);
+      break;
+    }
+    case 'month':
+      start.setDate(1);
+      start.setHours(0, 0, 0, 0);
+      break;
+    case 'all':
+      start.setTime(0);
+      break;
+  }
+
+  return start;
+}
+
+function isInTimeRange(dateIsoStr: string, range: TimeRange): boolean {
+  if (range === 'all') return true;
+  const dateTs = new Date(dateIsoStr).getTime();
+  const startTs = getTimeRangeStart(range).getTime();
+  const nowTs = Date.now();
+  return dateTs >= startTs && dateTs <= nowTs;
+}
+
+function getDaysForTrend(range: TimeRange): Date[] {
+  const days: Date[] = [];
+  const now = new Date();
+
+  if (range === 'today') {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    days.push(d);
+  } else if (range === 'week') {
+    const startOfWeek = getTimeRangeStart('week');
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(startOfWeek);
+      d.setDate(d.getDate() + i);
+      if (d <= now) {
+        days.push(d);
+      }
+    }
+  } else if (range === 'month') {
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const today = now.getDate();
+    for (let i = 1; i <= today; i++) {
+      days.push(new Date(year, month, i));
+    }
+  } else {
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      d.setHours(0, 0, 0, 0);
+      days.push(d);
+    }
+  }
+
+  return days;
+}
+
 function formatNumber(num: number): string {
   if (num >= 10000) {
     return (num / 10000).toFixed(1) + 'w';
@@ -162,6 +233,8 @@ interface StatCardProps {
   sparklineData?: number[];
   sparklineColor?: string;
   badge?: React.ReactNode;
+  deltaLabel?: string;
+  deltaValue?: number;
 }
 
 function StatCard({
@@ -174,15 +247,19 @@ function StatCard({
   subTrend,
   sparklineData,
   sparklineColor,
-  badge
+  badge,
+  deltaLabel,
+  deltaValue
 }: StatCardProps) {
   return (
     <div className="relative rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:shadow-md">
       {badge}
       <div className="flex items-start justify-between">
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-slate-500">{label}</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900 tracking-tight">{value}</p>
+          <p className="mt-2 text-3xl font-bold text-slate-900 tracking-tight transition-opacity duration-300">
+            {value}
+          </p>
           {subValue && (
             <div className="mt-2 flex items-center gap-1 text-xs">
               {subTrend === 'up' && (
@@ -202,8 +279,13 @@ function StatCard({
               )}
             </div>
           )}
+          {deltaLabel && deltaValue !== undefined && (
+            <div className="mt-2 text-xs text-slate-400">
+              {deltaLabel}：<span className="font-medium text-teal-600">+{deltaValue}</span>
+            </div>
+          )}
         </div>
-        <div className={cn('flex h-11 w-11 items-center justify-center rounded-xl', iconBg)}>
+        <div className={cn('flex h-11 w-11 items-center justify-center rounded-xl shrink-0 ml-3', iconBg)}>
           <Icon className={cn('h-5 w-5', iconColor)} />
         </div>
       </div>
@@ -216,18 +298,6 @@ function StatCard({
       )}
     </div>
   );
-}
-
-function getLast7Days(): Date[] {
-  const days: Date[] = [];
-  const now = new Date();
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    d.setHours(0, 0, 0, 0);
-    days.push(d);
-  }
-  return days;
 }
 
 function getDateKey(date: Date): string {
@@ -246,6 +316,12 @@ export default function DashboardPage() {
 
   const [timeRange, setTimeRange] = useState<TimeRange>('all');
   const [serviceFilter, setServiceFilter] = useState<ServiceType | 'all'>('all');
+  const [statsAnimKey, setStatsAnimKey] = useState(0);
+
+  const handleTimeRangeChange = (range: TimeRange) => {
+    setTimeRange(range);
+    setStatsAnimKey(prev => prev + 1);
+  };
 
   const stats = useMemo(() => {
     const totalArticles = articles.length;
@@ -268,6 +344,10 @@ export default function DashboardPage() {
     const pendingFeedbacks = feedbacks.filter(f => f.status === 'pending').length;
     const pendingTotal = pendingContributions + pendingFeedbacks;
 
+    const newArticles = articles.filter(a => isInTimeRange(a.createdAt, timeRange)).length;
+
+    const newFavorites = favorites.filter(f => isInTimeRange(f.createdAt, timeRange)).length;
+
     return {
       totalArticles,
       favoriteCount,
@@ -275,9 +355,11 @@ export default function DashboardPage() {
       pendingTotal,
       pendingContributions,
       pendingFeedbacks,
-      articleGrowth: 12
+      articleGrowth: 12,
+      newArticles,
+      newFavorites
     };
-  }, [articles, favorites, contributions, feedbacks]);
+  }, [articles, favorites, contributions, feedbacks, timeRange]);
 
   const serviceStats = useMemo(() => {
     const result = ALL_SERVICES.map(service => {
@@ -287,8 +369,11 @@ export default function DashboardPage() {
         ? Math.round((articleCount / articles.length) * 100)
         : 0;
 
+      const newArticleCount = serviceArticles.filter(a => isInTimeRange(a.createdAt, timeRange)).length;
+
       const articleIdSet = new Set(serviceArticles.map(a => a.id));
       const favoriteCount = favorites.filter(f => articleIdSet.has(f.articleId)).length;
+      const periodFavoriteCount = favorites.filter(f => articleIdSet.has(f.articleId) && isInTimeRange(f.createdAt, timeRange)).length;
 
       let totalRatingW = 0;
       let totalRatingC = 0;
@@ -305,15 +390,19 @@ export default function DashboardPage() {
       const viewCount = serviceArticles.reduce((sum, a) => sum + a.viewCount, 0);
 
       const feedbackCount = feedbacks.filter(f => articleIdSet.has(f.articleId)).length;
+      const periodFeedbackCount = feedbacks.filter(f => articleIdSet.has(f.articleId) && isInTimeRange(f.createdAt, timeRange)).length;
 
       return {
         service,
         articleCount,
         articlePercent,
+        newArticleCount,
         favoriteCount,
+        periodFavoriteCount,
         avgRating,
         viewCount,
-        feedbackCount
+        feedbackCount,
+        periodFeedbackCount
       };
     });
 
@@ -321,10 +410,10 @@ export default function DashboardPage() {
       return result.filter(s => s.service === serviceFilter);
     }
     return result;
-  }, [articles, favorites, feedbacks, serviceFilter]);
+  }, [articles, favorites, feedbacks, serviceFilter, timeRange]);
 
   const reviewTrend = useMemo(() => {
-    const days = getLast7Days();
+    const days = getDaysForTrend(timeRange);
     const result = days.map(day => {
       const dayEnd = new Date(day);
       dayEnd.setDate(dayEnd.getDate() + 1);
@@ -342,16 +431,25 @@ export default function DashboardPage() {
         }
       }
 
+      let newFeedbacks = 0;
+      for (const feedback of feedbacks) {
+        const ts = new Date(feedback.createdAt).getTime();
+        if (ts >= dayStartTs && ts < dayEndTs) {
+          newFeedbacks++;
+        }
+      }
+
       return {
         date: day,
         dateKey: getDateKey(day),
         label: formatDayLabel(day),
         approved,
-        rejected
+        rejected,
+        newFeedbacks
       };
     });
     return result;
-  }, [reviewRecords]);
+  }, [reviewRecords, feedbacks, timeRange]);
 
   const maxReviewDay = useMemo(() => {
     return Math.max(...reviewTrend.map(d => d.approved + d.rejected), 1);
@@ -424,7 +522,7 @@ export default function DashboardPage() {
               {TIME_RANGE_OPTIONS.map(opt => (
                 <button
                   key={opt.value}
-                  onClick={() => setTimeRange(opt.value)}
+                  onClick={() => handleTimeRangeChange(opt.value)}
                   className={cn(
                     'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all',
                     timeRange === opt.value
@@ -453,7 +551,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div key={statsAnimKey} className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 transition-opacity duration-300">
           <StatCard
             icon={BookOpen}
             iconBg="bg-teal-50"
@@ -464,6 +562,8 @@ export default function DashboardPage() {
             subTrend="up"
             sparklineData={[8, 12, 15, 18, 22, 28, 35]}
             sparklineColor="#0d9488"
+            deltaLabel="本期新增"
+            deltaValue={stats.newArticles}
           />
           <StatCard
             icon={Heart}
@@ -475,6 +575,8 @@ export default function DashboardPage() {
             subTrend="neutral"
             sparklineData={[3, 5, 8, 12, 15, 18, 22]}
             sparklineColor="#e11d48"
+            deltaLabel="本期收藏"
+            deltaValue={stats.newFavorites}
           />
           <StatCard
             icon={Star}
@@ -524,6 +626,7 @@ export default function DashboardPage() {
                 <tr className="text-left text-xs font-medium uppercase tracking-wider text-slate-500">
                   <th className="px-6 py-3 whitespace-nowrap">服务名称</th>
                   <th className="px-6 py-3 text-right whitespace-nowrap">文章数量</th>
+                  <th className="px-6 py-3 text-right whitespace-nowrap">本期新增</th>
                   <th className="px-6 py-3 text-right whitespace-nowrap">收藏数</th>
                   <th className="px-6 py-3 text-right whitespace-nowrap">平均评分</th>
                   <th className="px-6 py-3 text-right whitespace-nowrap">浏览量</th>
@@ -587,7 +690,19 @@ export default function DashboardPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right whitespace-nowrap">
-                        <span className="font-medium text-rose-600">{row.favoriteCount}</span>
+                        <span className="inline-flex items-center gap-0.5 text-sm font-medium text-teal-600">
+                          +{row.newArticleCount}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right whitespace-nowrap">
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="font-medium text-rose-600">{row.favoriteCount}</span>
+                          {row.periodFavoriteCount > 0 && (
+                            <span className="text-[10px] text-slate-400">
+                              本期 +{row.periodFavoriteCount}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-right whitespace-nowrap">
                         {row.avgRating > 0 ? (
@@ -607,12 +722,19 @@ export default function DashboardPage() {
                         <span className="font-medium text-slate-700">{formatNumber(row.viewCount)}</span>
                       </td>
                       <td className="px-6 py-4 text-right whitespace-nowrap">
-                        <span className={cn(
-                          'font-medium',
-                          row.feedbackCount > 0 ? 'text-red-600' : 'text-slate-400'
-                        )}>
-                          {row.feedbackCount}
-                        </span>
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className={cn(
+                            'font-medium',
+                            row.feedbackCount > 0 ? 'text-red-600' : 'text-slate-400'
+                          )}>
+                            {row.feedbackCount}
+                          </span>
+                          {row.periodFeedbackCount > 0 && (
+                            <span className="text-[10px] text-slate-400">
+                              本期 +{row.periodFeedbackCount}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-right whitespace-nowrap">
                         <Button
@@ -643,7 +765,7 @@ export default function DashboardPage() {
               </Button>
             </div>
             <div className="p-6">
-              <div className="flex items-end gap-4 mb-4">
+              <div className="flex items-end gap-4 mb-4 flex-wrap">
                 <div className="flex items-center gap-2">
                   <span className="h-3 w-3 rounded-sm bg-blue-500" />
                   <span className="text-xs text-slate-600">通过</span>
@@ -651,6 +773,10 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-2">
                   <span className="h-3 w-3 rounded-sm bg-red-400" />
                   <span className="text-xs text-slate-600">驳回</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="h-3 w-3 rounded-sm bg-amber-400" />
+                  <span className="text-xs text-slate-600">新增反馈</span>
                 </div>
               </div>
               <div className="space-y-3">
@@ -709,17 +835,29 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
-              <div className="mt-6 grid grid-cols-2 gap-4 pt-4 border-t border-slate-100">
+              <div className="mt-6 grid grid-cols-3 gap-4 pt-4 border-t border-slate-100">
                 <div className="rounded-lg bg-blue-50 p-3">
-                  <div className="text-xs text-blue-600 font-medium mb-1">7日总通过</div>
+                  <div className="text-xs text-blue-600 font-medium mb-1">
+                    {timeRange === 'today' ? '今日' : timeRange === 'week' ? '本周' : timeRange === 'month' ? '本月' : '累计'}通过
+                  </div>
                   <div className="text-xl font-bold text-blue-700">
                     {reviewTrend.reduce((sum, d) => sum + d.approved, 0)}
                   </div>
                 </div>
                 <div className="rounded-lg bg-red-50 p-3">
-                  <div className="text-xs text-red-600 font-medium mb-1">7日总驳回</div>
+                  <div className="text-xs text-red-600 font-medium mb-1">
+                    {timeRange === 'today' ? '今日' : timeRange === 'week' ? '本周' : timeRange === 'month' ? '本月' : '累计'}驳回
+                  </div>
                   <div className="text-xl font-bold text-red-700">
                     {reviewTrend.reduce((sum, d) => sum + d.rejected, 0)}
+                  </div>
+                </div>
+                <div className="rounded-lg bg-amber-50 p-3">
+                  <div className="text-xs text-amber-600 font-medium mb-1">
+                    {timeRange === 'today' ? '今日' : timeRange === 'week' ? '本周' : timeRange === 'month' ? '本月' : '累计'}新增反馈
+                  </div>
+                  <div className="text-xl font-bold text-amber-700">
+                    {reviewTrend.reduce((sum, d) => sum + d.newFeedbacks, 0)}
                   </div>
                 </div>
               </div>
@@ -728,8 +866,11 @@ export default function DashboardPage() {
 
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <h2 className="text-base font-semibold text-slate-900">热门文章 TOP5</h2>
-              <span className="text-xs text-slate-500">按浏览量排序</span>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold text-slate-900">热门文章 TOP5</h2>
+                <Badge variant="default" className="text-[10px]">历史热门</Badge>
+              </div>
+              <span className="text-xs text-slate-500">按总浏览量排序</span>
             </div>
             <div className="divide-y divide-slate-100">
               {topArticles.length === 0 ? (

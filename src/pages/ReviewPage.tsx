@@ -32,8 +32,9 @@ import Badge from '@/components/UI/Badge';
 import Button from '@/components/UI/Button';
 import Modal from '@/components/UI/Modal';
 import { useReviewStore, type EditedContributionData, type EditedArticleContent } from '@/store/reviewStore';
+import { useArticleStore } from '@/store/articleStore';
 import type { Contribution, ContributionType, ReviewRecord, InvalidFeedback, FeedbackStatus, ServiceType } from '@/types';
-import type { Step, Command } from '@/data/mockArticles';
+import type { Step, Command, Article } from '@/data/mockArticles';
 import { cn } from '@/lib/utils';
 
 type TabKey = 'pending' | 'history' | 'feedback';
@@ -291,6 +292,15 @@ export default function ReviewPage() {
 
   const [editedContent, setEditedContent] = useState<EditedArticleContent>({});
 
+  const [selectedContributions, setSelectedContributions] = useState<Set<string>>(new Set());
+  const [selectedFeedbacks, setSelectedFeedbacks] = useState<Set<string>>(new Set());
+  const [batchApproveModalOpen, setBatchApproveModalOpen] = useState(false);
+  const [batchRejectModalOpen, setBatchRejectModalOpen] = useState(false);
+  const [batchFeedbackResolveModalOpen, setBatchFeedbackResolveModalOpen] = useState(false);
+  const [batchFeedbackRejectModalOpen, setBatchFeedbackRejectModalOpen] = useState(false);
+  const [batchRemark, setBatchRemark] = useState('');
+  const [batchProcessing, setBatchProcessing] = useState(false);
+
   const pendingFeedbackList = useMemo(
     () => feedbacks
       .filter(f => f.status === 'pending')
@@ -385,6 +395,32 @@ export default function ReviewPage() {
         phenomenon: contribution.summary,
         attention: ''
       });
+    } else if (contribution.type === 'update_article' && contribution.articleId) {
+      const article = useArticleStore.getState().getArticleById(contribution.articleId);
+      if (article) {
+        setEditedContent({
+          service: article.service as ServiceType,
+          errorCodes: [...article.errorCodes],
+          versions: [...article.versions],
+          tags: [...article.tags],
+          title: article.title,
+          phenomenon: article.phenomenon,
+          attention: article.attention,
+          steps: article.steps.map(s => ({ ...s })),
+          commands: article.commands.map(c => ({ ...c }))
+        });
+      } else {
+        setEditedContent({
+          title: contribution.title,
+          phenomenon: contribution.summary,
+          errorCodes: [],
+          versions: [],
+          tags: [],
+          steps: [],
+          commands: [],
+          attention: ''
+        });
+      }
     } else if (contribution.type === 'update_article') {
       setEditedContent({
         title: contribution.title,
@@ -552,13 +588,66 @@ export default function ReviewPage() {
     });
   }
 
+  const originalArticle = useMemo(() => {
+    if (selectedContribution?.type === 'update_article' && selectedContribution.articleId) {
+      return useArticleStore.getState().getArticleById(selectedContribution.articleId);
+    }
+    return undefined;
+  }, [selectedContribution]);
+
+  function formatOriginalContent(article: Article | undefined, contribution: Contribution): string {
+    if (contribution.type === 'new_article') {
+      return '（新文章无原文）';
+    }
+    if (contribution.type === 'new_case') {
+      return `案例关联文章「${contribution.articleId ?? '关联文章'}」的正文内容...`;
+    }
+    if (!article) {
+      return '（未找到关联文章）';
+    }
+    const lines: string[] = [];
+    lines.push(`# ${article.title}`);
+    lines.push('');
+    lines.push(`**服务：** ${article.service}`);
+    lines.push('');
+    lines.push(`**错误码：** ${article.errorCodes.join('、')}`);
+    lines.push('');
+    lines.push(`**适用版本：** ${article.versions.join('、')}`);
+    lines.push('');
+    lines.push(`**标签：** ${article.tags.join('、')}`);
+    lines.push('');
+    lines.push('## 现象描述');
+    lines.push('');
+    lines.push(article.phenomenon);
+    lines.push('');
+    lines.push('## 注意事项');
+    lines.push('');
+    lines.push(article.attention);
+    lines.push('');
+    lines.push('## 排查步骤');
+    lines.push('');
+    article.steps.forEach((step, idx) => {
+      lines.push(`${idx + 1}. ${step.title}`);
+      lines.push(`   ${step.description}`);
+      lines.push('');
+    });
+    lines.push('## 常用命令');
+    lines.push('');
+    article.commands.forEach((cmd) => {
+      lines.push(`### ${cmd.name}`);
+      lines.push('');
+      lines.push('```bash');
+      lines.push(cmd.cmd);
+      lines.push('```');
+      lines.push('');
+      lines.push(cmd.description);
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+
   const originalContent = selectedContribution
-    ? `# ${selectedContribution.title}\n\n${selectedContribution.summary}\n\n` +
-      (selectedContribution.type === 'update_article'
-        ? `## 原文内容\n\n这是关联文章「${selectedContribution.articleId ?? '关联文章'}」的原始内容。包含原有排查步骤、常用命令、注意事项等章节...`
-        : selectedContribution.type === 'new_case'
-        ? `## 原文内容\n\n案例关联文章「${selectedContribution.articleId ?? '关联文章'}」的正文内容...`
-        : '（新文章无原文）')
+    ? formatOriginalContent(originalArticle, selectedContribution)
     : '';
 
   const proposedContent = selectedContribution
@@ -569,6 +658,124 @@ export default function ReviewPage() {
     () => computeDiff(originalContent, proposedContent),
     [originalContent, proposedContent]
   );
+
+  const allPendingSelected = pendingList.length > 0 && pendingList.every(c => selectedContributions.has(c.id));
+  const somePendingSelected = pendingList.some(c => selectedContributions.has(c.id)) && !allPendingSelected;
+
+  const allFeedbackSelected = pendingFeedbackList.length > 0 && pendingFeedbackList.every(f => selectedFeedbacks.has(f.id));
+  const someFeedbackSelected = pendingFeedbackList.some(f => selectedFeedbacks.has(f.id)) && !allFeedbackSelected;
+
+  function toggleContributionSelect(id: string) {
+    setSelectedContributions(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function toggleAllContributions() {
+    if (allPendingSelected) {
+      setSelectedContributions(new Set());
+    } else {
+      setSelectedContributions(new Set(pendingList.map(c => c.id)));
+    }
+  }
+
+  function toggleFeedbackSelect(id: string) {
+    setSelectedFeedbacks(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function toggleAllFeedbacks() {
+    if (allFeedbackSelected) {
+      setSelectedFeedbacks(new Set());
+    } else {
+      setSelectedFeedbacks(new Set(pendingFeedbackList.map(f => f.id)));
+    }
+  }
+
+  function openBatchApprove() {
+    setBatchRemark('');
+    setBatchApproveModalOpen(true);
+  }
+
+  function openBatchReject() {
+    setBatchRemark('');
+    setBatchRejectModalOpen(true);
+  }
+
+  function openBatchFeedbackResolve() {
+    setBatchRemark('');
+    setBatchFeedbackResolveModalOpen(true);
+  }
+
+  function openBatchFeedbackReject() {
+    setBatchRemark('');
+    setBatchFeedbackRejectModalOpen(true);
+  }
+
+  async function handleBatchApprove() {
+    if (selectedContributions.size === 0 || batchProcessing) return;
+    setBatchProcessing(true);
+    const ids = Array.from(selectedContributions);
+    for (const id of ids) {
+      approveContribution(id, CURRENT_REVIEWER, batchRemark || undefined);
+    }
+    setSelectedContributions(new Set());
+    setBatchApproveModalOpen(false);
+    setBatchProcessing(false);
+    setBatchRemark('');
+  }
+
+  async function handleBatchReject() {
+    if (selectedContributions.size === 0 || !batchRemark.trim() || batchProcessing) return;
+    setBatchProcessing(true);
+    const ids = Array.from(selectedContributions);
+    for (const id of ids) {
+      rejectContribution(id, CURRENT_REVIEWER, batchRemark.trim());
+    }
+    setSelectedContributions(new Set());
+    setBatchRejectModalOpen(false);
+    setBatchProcessing(false);
+    setBatchRemark('');
+  }
+
+  async function handleBatchFeedbackResolve() {
+    if (selectedFeedbacks.size === 0 || !batchRemark.trim() || batchProcessing) return;
+    setBatchProcessing(true);
+    const ids = Array.from(selectedFeedbacks);
+    for (const id of ids) {
+      resolveFeedback(id, CURRENT_REVIEWER, batchRemark.trim());
+    }
+    setSelectedFeedbacks(new Set());
+    setBatchFeedbackResolveModalOpen(false);
+    setBatchProcessing(false);
+    setBatchRemark('');
+  }
+
+  async function handleBatchFeedbackReject() {
+    if (selectedFeedbacks.size === 0 || !batchRemark.trim() || batchProcessing) return;
+    setBatchProcessing(true);
+    const ids = Array.from(selectedFeedbacks);
+    for (const id of ids) {
+      rejectFeedback(id, CURRENT_REVIEWER, batchRemark.trim());
+    }
+    setSelectedFeedbacks(new Set());
+    setBatchFeedbackRejectModalOpen(false);
+    setBatchProcessing(false);
+    setBatchRemark('');
+  }
 
   return (
     <MainLayout>
@@ -755,12 +962,91 @@ export default function ReviewPage() {
                   <p className="mt-1 text-sm text-slate-500">暂无待审核的贡献内容</p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {pendingList.map(contribution => (
+                <>
+                  <div className="sticky top-16 z-20 -mx-6 mb-4 flex items-center justify-between border-b border-slate-200 bg-white/95 px-6 py-3 backdrop-blur-sm">
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={toggleAllContributions}
+                        className="inline-flex items-center gap-2 text-sm font-medium text-slate-700 hover:text-teal-600 transition-colors"
+                      >
+                        <span className={cn(
+                          'flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all',
+                          allPendingSelected
+                            ? 'border-teal-500 bg-teal-500 text-white'
+                            : somePendingSelected
+                            ? 'border-teal-500 bg-teal-500 text-white'
+                            : 'border-slate-300 bg-white'
+                        )}>
+                          {allPendingSelected && (
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                          {somePendingSelected && (
+                            <span className="h-2 w-2 rounded-full bg-white" />
+                          )}
+                        </span>
+                        {allPendingSelected ? '取消全选' : '全选'}
+                      </button>
+                      <span className="text-sm text-slate-500">
+                        已选 <span className="font-semibold text-teal-600">{selectedContributions.size}</span> 项
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={openBatchReject}
+                        disabled={selectedContributions.size === 0}
+                        className={selectedContributions.size === 0 ? 'cursor-not-allowed' : ''}
+                      >
+                        <XCircle className="h-4 w-4" />
+                        批量驳回
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={openBatchApprove}
+                        disabled={selectedContributions.size === 0}
+                        className={selectedContributions.size === 0 ? 'cursor-not-allowed' : ''}
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        批量通过
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                  {pendingList.map(contribution => {
+                    const isSelected = selectedContributions.has(contribution.id);
+                    return (
                     <div
                       key={contribution.id}
-                      className="rounded-xl border border-slate-200 bg-white p-5 transition-shadow hover:shadow-md"
+                      className={cn(
+                        'relative rounded-xl border p-5 transition-all hover:shadow-md',
+                        isSelected
+                          ? 'border-teal-400 bg-teal-50/30'
+                          : 'border-slate-200 bg-white'
+                      )}
                     >
+                      <button
+                        type="button"
+                        onClick={() => toggleContributionSelect(contribution.id)}
+                        className="absolute left-4 top-4 z-10"
+                      >
+                        <span className={cn(
+                          'flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all',
+                          isSelected
+                            ? 'border-teal-500 bg-teal-500 text-white'
+                            : 'border-slate-300 bg-white hover:border-teal-400'
+                        )}>
+                          {isSelected && (
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </span>
+                      </button>
+                      <div className="pl-8">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant={CONTRIBUTION_TYPE_COLORS[contribution.type]}>
@@ -843,9 +1129,12 @@ export default function ReviewPage() {
                           </div>
                         </div>
                       </div>
+                      </div>
                     </div>
-                  ))}
-                </div>
+                    );
+                  })}
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -1051,12 +1340,91 @@ export default function ReviewPage() {
                       <p className="mt-1 text-sm text-slate-500">暂无待处理的失效反馈</p>
                     </div>
                   ) : (
-                    <div className="space-y-4">
-                      {pendingFeedbackList.map(feedback => (
+                    <>
+                      <div className="sticky top-16 z-20 -mx-6 mb-4 flex items-center justify-between border-b border-slate-200 bg-white/95 px-6 py-3 backdrop-blur-sm">
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={toggleAllFeedbacks}
+                            className="inline-flex items-center gap-2 text-sm font-medium text-slate-700 hover:text-teal-600 transition-colors"
+                          >
+                            <span className={cn(
+                              'flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all',
+                              allFeedbackSelected
+                                ? 'border-teal-500 bg-teal-500 text-white'
+                                : someFeedbackSelected
+                                ? 'border-teal-500 bg-teal-500 text-white'
+                                : 'border-slate-300 bg-white'
+                            )}>
+                              {allFeedbackSelected && (
+                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                              {someFeedbackSelected && (
+                                <span className="h-2 w-2 rounded-full bg-white" />
+                              )}
+                            </span>
+                            {allFeedbackSelected ? '取消全选' : '全选'}
+                          </button>
+                          <span className="text-sm text-slate-500">
+                            已选 <span className="font-semibold text-teal-600">{selectedFeedbacks.size}</span> 项
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={openBatchFeedbackReject}
+                            disabled={selectedFeedbacks.size === 0}
+                            className={selectedFeedbacks.size === 0 ? 'cursor-not-allowed' : ''}
+                          >
+                            <ThumbsDown className="h-4 w-4" />
+                            批量驳回
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={openBatchFeedbackResolve}
+                            disabled={selectedFeedbacks.size === 0}
+                            className={selectedFeedbacks.size === 0 ? 'cursor-not-allowed' : ''}
+                          >
+                            <ThumbsUp className="h-4 w-4" />
+                            批量已处理
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                      {pendingFeedbackList.map(feedback => {
+                        const isSelected = selectedFeedbacks.has(feedback.id);
+                        return (
                         <div
                           key={feedback.id}
-                          className="rounded-xl border border-slate-200 bg-white p-5 transition-shadow hover:shadow-md"
+                          className={cn(
+                            'relative rounded-xl border p-5 transition-all hover:shadow-md',
+                            isSelected
+                              ? 'border-teal-400 bg-teal-50/30'
+                              : 'border-slate-200 bg-white'
+                          )}
                         >
+                          <button
+                            type="button"
+                            onClick={() => toggleFeedbackSelect(feedback.id)}
+                            className="absolute left-4 top-4 z-10"
+                          >
+                            <span className={cn(
+                              'flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all',
+                              isSelected
+                                ? 'border-teal-500 bg-teal-500 text-white'
+                                : 'border-slate-300 bg-white hover:border-teal-400'
+                            )}>
+                              {isSelected && (
+                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </span>
+                          </button>
+                          <div className="pl-8">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex flex-wrap items-center gap-2">
                               <Badge variant="warning">
@@ -1135,9 +1503,12 @@ export default function ReviewPage() {
                               </Button>
                             </div>
                           </div>
+                          </div>
                         </div>
-                      ))}
-                    </div>
+                        );
+                      })}
+                      </div>
+                    </>
                   )
                 )}
 
@@ -1851,6 +2222,200 @@ export default function ReviewPage() {
             )}
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={batchApproveModalOpen}
+        onClose={() => { setBatchApproveModalOpen(false); setBatchRemark(''); }}
+        title={`批量通过贡献 (${selectedContributions.size} 条)`}
+        footer={
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1">
+              <textarea
+                placeholder="请输入审核备注（可选）"
+                value={batchRemark}
+                onChange={e => setBatchRemark(e.target.value)}
+                rows={2}
+                className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              />
+            </div>
+            <div className="flex items-center gap-2 sm:shrink-0">
+              <Button
+                variant="secondary"
+                onClick={() => { setBatchApproveModalOpen(false); setBatchRemark(''); }}
+              >
+                取消
+              </Button>
+              <Button
+                onClick={handleBatchApprove}
+                disabled={batchProcessing}
+              >
+                {batchProcessing ? '处理中...' : '确认批量通过'}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-lg bg-green-50 p-4 border border-green-200">
+            <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+            <div className="text-sm text-green-800">
+              <p className="font-medium">确认批量通过</p>
+              <p className="mt-1">
+                确定要批量通过 <span className="font-bold">{selectedContributions.size}</span> 条贡献吗？
+              </p>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500">
+            批量通过后，所有选中的贡献状态将更新为"已通过"，并记录审核人和审核时间。
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={batchRejectModalOpen}
+        onClose={() => { setBatchRejectModalOpen(false); setBatchRemark(''); }}
+        title={`批量驳回贡献 (${selectedContributions.size} 条)`}
+        footer={
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1">
+              <textarea
+                placeholder="请输入驳回备注（必填）"
+                value={batchRemark}
+                onChange={e => setBatchRemark(e.target.value)}
+                rows={2}
+                className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              />
+            </div>
+            <div className="flex items-center gap-2 sm:shrink-0">
+              <Button
+                variant="secondary"
+                onClick={() => { setBatchRejectModalOpen(false); setBatchRemark(''); }}
+              >
+                取消
+              </Button>
+              <Button
+                variant="danger"
+                onClick={handleBatchReject}
+                disabled={!batchRemark.trim() || batchProcessing}
+              >
+                {batchProcessing ? '处理中...' : '确认批量驳回'}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-lg bg-red-50 p-4 border border-red-200">
+            <XCircle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+            <div className="text-sm text-red-800">
+              <p className="font-medium">确认批量驳回</p>
+              <p className="mt-1">
+                确定要批量驳回 <span className="font-bold">{selectedContributions.size}</span> 条贡献吗？
+              </p>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500">
+            驳回后所有选中的贡献状态将更新为"已驳回"。请在备注中说明驳回原因，方便提交人理解。
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={batchFeedbackResolveModalOpen}
+        onClose={() => { setBatchFeedbackResolveModalOpen(false); setBatchRemark(''); }}
+        title={`批量标记已处理 (${selectedFeedbacks.size} 条)`}
+        footer={
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1">
+              <textarea
+                placeholder="请输入处理备注（必填）"
+                value={batchRemark}
+                onChange={e => setBatchRemark(e.target.value)}
+                rows={2}
+                className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              />
+            </div>
+            <div className="flex items-center gap-2 sm:shrink-0">
+              <Button
+                variant="secondary"
+                onClick={() => { setBatchFeedbackResolveModalOpen(false); setBatchRemark(''); }}
+              >
+                取消
+              </Button>
+              <Button
+                onClick={handleBatchFeedbackResolve}
+                disabled={!batchRemark.trim() || batchProcessing}
+              >
+                {batchProcessing ? '处理中...' : '确认已处理'}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-lg bg-green-50 p-4 border border-green-200">
+            <ThumbsUp className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+            <div className="text-sm text-green-800">
+              <p className="font-medium">确认批量标记已处理</p>
+              <p className="mt-1">
+                确定要将 <span className="font-bold">{selectedFeedbacks.size}</span> 条反馈标记为已处理吗？
+              </p>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500">
+            标记为已处理后，这些反馈状态将更新为"已处理"，并记录处理人和处理时间。请确保相关问题已在知识库中修复。
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={batchFeedbackRejectModalOpen}
+        onClose={() => { setBatchFeedbackRejectModalOpen(false); setBatchRemark(''); }}
+        title={`批量驳回反馈 (${selectedFeedbacks.size} 条)`}
+        footer={
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1">
+              <textarea
+                placeholder="请输入驳回备注（必填）"
+                value={batchRemark}
+                onChange={e => setBatchRemark(e.target.value)}
+                rows={2}
+                className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+              />
+            </div>
+            <div className="flex items-center gap-2 sm:shrink-0">
+              <Button
+                variant="secondary"
+                onClick={() => { setBatchFeedbackRejectModalOpen(false); setBatchRemark(''); }}
+              >
+                取消
+              </Button>
+              <Button
+                variant="danger"
+                onClick={handleBatchFeedbackReject}
+                disabled={!batchRemark.trim() || batchProcessing}
+              >
+                {batchProcessing ? '处理中...' : '确认驳回'}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-lg bg-red-50 p-4 border border-red-200">
+            <ThumbsDown className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+            <div className="text-sm text-red-800">
+              <p className="font-medium">确认批量驳回反馈</p>
+              <p className="mt-1">
+                确定要驳回 <span className="font-bold">{selectedFeedbacks.size}</span> 条反馈吗？
+              </p>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500">
+            驳回后这些反馈状态将更新为"已驳回"。请在备注中说明驳回原因，方便反馈人理解。
+          </p>
+        </div>
       </Modal>
     </MainLayout>
   );

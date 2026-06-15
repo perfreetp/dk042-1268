@@ -8,6 +8,7 @@ export interface ExportOptions {
   includeIncidents?: boolean;
   includeCases?: boolean;
   includeMeta?: boolean;
+  includeAttention?: boolean;
   generateTableOfContents?: boolean;
   author?: string;
 }
@@ -19,6 +20,7 @@ const defaultOptions: Required<Omit<ExportOptions, 'title' | 'author'>> & { titl
   includeIncidents: true,
   includeCases: true,
   includeMeta: true,
+  includeAttention: true,
   generateTableOfContents: true,
   author: '知识库系统'
 };
@@ -117,10 +119,12 @@ function generateArticleMarkdown(
   lines.push(escapeMarkdown(article.phenomenon));
   lines.push('');
 
-  lines.push('### 注意事项');
-  lines.push('');
-  lines.push(formatAttention(article.attention as string | string[]));
-  lines.push('');
+  if (options.includeAttention && article.attention) {
+    lines.push('### 注意事项');
+    lines.push('');
+    lines.push(formatAttention(article.attention as string | string[]));
+    lines.push('');
+  }
 
   if (options.includeSteps && article.steps.length > 0) {
     lines.push('### 排查步骤');

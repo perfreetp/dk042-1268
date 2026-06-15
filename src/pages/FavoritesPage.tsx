@@ -47,6 +47,8 @@ interface ManualConfig {
   includeCommands: boolean;
   includeIncidents: boolean;
   includeCases: boolean;
+  includeAttention: boolean;
+  includeMeta: boolean;
 }
 
 const defaultConfig: ManualConfig = {
@@ -54,6 +56,8 @@ const defaultConfig: ManualConfig = {
   includeCommands: true,
   includeIncidents: true,
   includeCases: true,
+  includeAttention: true,
+  includeMeta: true,
 };
 
 function formatFavDate(iso: string): string {
@@ -216,19 +220,40 @@ export default function FavoritesPage() {
       serviceGroup.get(label)!.push(a);
     });
 
-    const firstArticle = articles[0];
-    let attentionList: string[] = [];
-    if (firstArticle?.attention) {
-      const attentionVal = firstArticle.attention as unknown;
-      attentionList = Array.isArray(attentionVal)
-        ? (attentionVal as string[])
-        : typeof attentionVal === 'string' && attentionVal
-        ? [attentionVal as string]
-        : [];
-    }
+    const previewArticles = articles.slice(0, 2);
 
-    return { dateStr, serviceGroup, firstArticle, attentionList, count: articles.length };
-  }, [selectedArticles, manualTitle, compiler]);
+    let totalChars = 0;
+    articles.forEach(a => {
+      totalChars += a.title.length;
+      totalChars += a.phenomenon.length;
+      if (config.includeSteps) {
+        a.steps.forEach(s => { totalChars += s.description.length; });
+      }
+      if (config.includeCommands) {
+        a.commands.forEach(c => { totalChars += c.description.length; });
+      }
+      if (config.includeAttention && a.attention) {
+        const attVal = a.attention as unknown;
+        if (Array.isArray(attVal)) {
+          (attVal as string[]).forEach(s => { totalChars += s.length; });
+        } else if (typeof attVal === 'string') {
+          totalChars += attVal.length;
+        }
+      }
+    });
+
+    const estimatedPages = Math.max(1, Math.ceil(totalChars / 1500));
+
+    return {
+      dateStr,
+      serviceGroup,
+      previewArticles,
+      count: articles.length,
+      remainingCount: Math.max(0, articles.length - 2),
+      totalChars,
+      estimatedPages,
+    };
+  }, [selectedArticles, manualTitle, compiler, config]);
 
   const markdownContent = useMemo(() => {
     const exportOptions: ExportOptions = {
@@ -238,6 +263,8 @@ export default function FavoritesPage() {
       includeCommands: config.includeCommands,
       includeIncidents: config.includeIncidents,
       includeCases: config.includeCases,
+      includeAttention: config.includeAttention,
+      includeMeta: config.includeMeta,
     };
     return generateOnCallManual(selectedArticles, exportOptions);
   }, [selectedArticles, manualTitle, compiler, config]);
@@ -699,12 +726,14 @@ export default function FavoritesPage() {
                     内容配置
                   </div>
                   <div className="space-y-2.5">
-                    {(Object.keys(defaultConfig) as (keyof ManualConfig)[]).map((key) => {
+                    {(['includeSteps', 'includeCommands', 'includeIncidents', 'includeCases', 'includeAttention', 'includeMeta'] as (keyof ManualConfig)[]).map((key) => {
                       const labelMap: Record<keyof ManualConfig, string> = {
                         includeSteps: '排查步骤',
                         includeCommands: '常用命令',
                         includeIncidents: '历史事故',
                         includeCases: '典型案例',
+                        includeAttention: '包含注意事项',
+                        includeMeta: '包含元信息',
                       };
                       const active = config[key];
                       return (
@@ -713,7 +742,7 @@ export default function FavoritesPage() {
                           type="button"
                           onClick={() => toggleConfig(key)}
                           className={cn(
-                            'w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg border text-left transition-all',
+                            'w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg border text-left transition-all duration-200',
                             active
                               ? 'bg-teal-50 border-teal-300 text-teal-700 ring-2 ring-teal-500/10'
                               : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
@@ -721,7 +750,7 @@ export default function FavoritesPage() {
                         >
                           <div
                             className={cn(
-                              'flex h-4 w-4 items-center justify-center rounded border transition-all shrink-0',
+                              'flex h-4 w-4 items-center justify-center rounded border transition-all duration-200 shrink-0',
                               active
                                 ? 'bg-teal-500 border-teal-500'
                                 : 'bg-white border-slate-300'
@@ -766,14 +795,19 @@ export default function FavoritesPage() {
 
               {/* 右侧预览区 70% */}
               <div className="col-span-7">
-                <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1.5">
-                  <Eye className="h-3.5 w-3.5" />
-                  实时预览
+                <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Eye className="h-3.5 w-3.5" />
+                    实时预览
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-normal">
+                    共 {previewContent.totalChars.toLocaleString()} 字 · 约 {previewContent.estimatedPages} 页
+                  </div>
                 </div>
-                <div className="rounded-2xl bg-slate-50 border border-slate-200 p-6 max-h-[520px] overflow-y-auto shadow-[0_10px_40px_-12px_rgba(15,23,42,0.12)]">
-                  {/* 封面信息 */}
-                  <div className="text-center space-y-3 pb-6 mb-6 border-b border-slate-200">
-                    <h1 className="text-2xl font-bold text-slate-900">{manualTitle || '故障处理值班手册'}</h1>
+                <div className="rounded-2xl bg-amber-50/30 border border-amber-100/60 p-6 max-h-[520px] overflow-y-auto shadow-[inset_0_2px_8px_rgba(120,80,40,0.05),0_10px_40px_-12px_rgba(15,23,42,0.12)]">
+                  {/* 封面区 */}
+                  <div className="text-center space-y-3 pb-6 mb-6 border-b border-amber-200/50">
+                    <h1 className="text-2xl font-bold text-slate-900 leading-tight">{manualTitle || '故障处理值班手册'}</h1>
                     <div className="space-y-1 text-sm text-slate-600">
                       <p>生成时间：{previewContent.dateStr}</p>
                       <p>整理人：{compiler || '知识库系统'}</p>
@@ -791,8 +825,8 @@ export default function FavoritesPage() {
                     </div>
                   </div>
 
-                  {/* 目录列表 */}
-                  <div className="pb-6 mb-6 border-b border-slate-200">
+                  {/* 目录区 */}
+                  <div className="pb-6 mb-6 border-b border-amber-200/50">
                     <h2 className="text-base font-bold text-slate-800 mb-3">📋 目录</h2>
                     <div className="space-y-3">
                       {Array.from(previewContent.serviceGroup.entries()).map(([label, list]) => (
@@ -801,65 +835,298 @@ export default function FavoritesPage() {
                             {label}
                           </h3>
                           <ol className="ml-4 space-y-1 text-xs text-slate-600 list-decimal">
-                            {list.slice(0, 3).map((a, i) => (
+                            {list.map((a, i) => (
                               <li key={a.id} className="truncate">
-                                <span className="hover:text-teal-600 cursor-pointer">
+                                <span className="hover:text-teal-600 cursor-pointer transition-colors">
                                   {i + 1}. {a.title}
                                 </span>
                               </li>
                             ))}
-                            {list.length > 3 && (
-                              <li className="text-slate-400">... 还有 {list.length - 3} 篇</li>
-                            )}
                           </ol>
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  {/* 第一篇正文片段 */}
-                  {previewContent.firstArticle && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <Badge variant="accent">{serviceLabels[previewContent.firstArticle.service as ServiceType]}</Badge>
-                        <h2 className="text-base font-bold text-slate-800">
-                          1. {previewContent.firstArticle.title}
-                        </h2>
-                      </div>
+                  {/* 正文预览 - 前2篇 */}
+                  <div className="space-y-8">
+                    {previewContent.previewArticles.map((article, articleIdx) => {
+                      const globalIdx = articleIdx + 1;
+                      const attentionVal = article.attention as unknown;
+                      const attentionList: string[] = Array.isArray(attentionVal)
+                        ? (attentionVal as string[])
+                        : typeof attentionVal === 'string' && attentionVal
+                        ? [attentionVal as string]
+                        : [];
 
-                      {config.includeSteps || config.includeCommands || config.includeIncidents || config.includeCases ? (
-                        <div className="space-y-4">
-                          <div>
-                            <h3 className="text-sm font-semibold text-slate-700 mb-1.5">故障现象</h3>
-                            <p className="text-xs text-slate-600 leading-relaxed line-clamp-3">
-                              {previewContent.firstArticle.phenomenon}
+                      return (
+                        <div key={article.id} className="preview-article">
+                          {/* 文章标题 */}
+                          <div className="flex items-center gap-2 mb-4">
+                            <Badge variant="accent">{serviceLabels[article.service as ServiceType]}</Badge>
+                            <h2 className="text-lg font-bold text-slate-800">
+                              {globalIdx}. {article.title}
+                            </h2>
+                          </div>
+
+                          {/* 元信息表 */}
+                          <div
+                            className={cn(
+                              'overflow-hidden transition-all duration-300 ease-out',
+                              config.includeMeta
+                                ? 'opacity-100 max-h-[500px] mb-4'
+                                : 'opacity-0 max-h-0 mb-0'
+                            )}
+                          >
+                            {config.includeMeta && (
+                              <div className="bg-white/60 rounded-lg border border-slate-200 overflow-hidden">
+                                <table className="w-full text-xs">
+                                  <tbody className="divide-y divide-slate-100">
+                                    <tr>
+                                      <td className="px-3 py-2 bg-slate-50/50 font-medium text-slate-600 w-20">服务</td>
+                                      <td className="px-3 py-2 text-slate-800">{serviceLabels[article.service as ServiceType]}</td>
+                                    </tr>
+                                    <tr>
+                                      <td className="px-3 py-2 bg-slate-50/50 font-medium text-slate-600">错误码</td>
+                                      <td className="px-3 py-2 text-slate-800 font-mono text-[11px]">{article.errorCodes.join('、')}</td>
+                                    </tr>
+                                    <tr>
+                                      <td className="px-3 py-2 bg-slate-50/50 font-medium text-slate-600">版本</td>
+                                      <td className="px-3 py-2 text-slate-800">{article.versions.join('、')}</td>
+                                    </tr>
+                                    <tr>
+                                      <td className="px-3 py-2 bg-slate-50/50 font-medium text-slate-600">标签</td>
+                                      <td className="px-3 py-2 text-slate-800">
+                                        {article.tags.map(t => (
+                                          <span key={t} className="inline-block px-1.5 py-0.5 mr-1 mb-0.5 bg-teal-100/50 text-teal-700 rounded text-[10px]">
+                                            {t}
+                                          </span>
+                                        ))}
+                                      </td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 故障现象 - 始终显示 */}
+                          <div className="mb-4">
+                            <h3 className="text-sm font-semibold text-slate-700 mb-2">故障现象</h3>
+                            <p className="text-xs text-slate-600 leading-relaxed">
+                              {article.phenomenon}
                             </p>
                           </div>
 
-                          {previewContent.attentionList.length > 0 && (
-                            <div>
-                              <h3 className="text-sm font-semibold text-slate-700 mb-1.5">⚠️ 注意事项</h3>
-                              <ul className="space-y-1">
-                                {previewContent.attentionList.slice(0, 3).map((item, idx) => (
-                                  <li key={idx} className="text-xs text-amber-700 bg-amber-50 px-2.5 py-1.5 rounded border border-amber-200">
-                                    {item}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
+                          {/* 注意事项 */}
+                          <div
+                            className={cn(
+                              'overflow-hidden transition-all duration-300 ease-out',
+                              config.includeAttention && attentionList.length > 0
+                                ? 'opacity-100 max-h-[500px] mb-4'
+                                : 'opacity-0 max-h-0 mb-0'
+                            )}
+                          >
+                            {config.includeAttention && attentionList.length > 0 && (
+                              <div>
+                                <h3 className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-1.5">
+                                  ⚠️ 注意事项
+                                </h3>
+                                <ul className="space-y-1.5">
+                                  {attentionList.map((item, idx) => (
+                                    <li key={idx} className="text-xs text-amber-800 bg-amber-100/40 px-3 py-2 rounded-lg border border-amber-200/50">
+                                      {item}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
 
-                          <div className="pt-2 border-t border-slate-200 text-xs text-slate-400 italic text-center">
-                            — 以下内容将在完整手册中继续 —
+                          {/* 排查步骤 */}
+                          <div
+                            className={cn(
+                              'overflow-hidden transition-all duration-300 ease-out',
+                              config.includeSteps && article.steps.length > 0
+                                ? 'opacity-100 max-h-[1000px] mb-4'
+                                : 'opacity-0 max-h-0 mb-0'
+                            )}
+                          >
+                            {config.includeSteps && article.steps.length > 0 && (
+                              <div>
+                                <h3 className="text-sm font-semibold text-slate-700 mb-2">🔍 排查步骤</h3>
+                                <ol className="space-y-2 ml-1">
+                                  {article.steps.slice(0, 3).map((step, stepIdx) => (
+                                    <li key={stepIdx} className="flex gap-2.5">
+                                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-teal-100 text-teal-700 text-[10px] font-bold flex items-center justify-center mt-0.5">
+                                        {stepIdx + 1}
+                                      </span>
+                                      <div className="flex-1">
+                                        <p className="text-xs font-medium text-slate-700">{(step as { title?: string }).title || `步骤 ${stepIdx + 1}`}</p>
+                                        <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">{step.description}</p>
+                                      </div>
+                                    </li>
+                                  ))}
+                                  {article.steps.length > 3 && (
+                                    <li className="text-[11px] text-slate-400 italic ml-7">
+                                      ... 还有 {article.steps.length - 3} 个步骤
+                                    </li>
+                                  )}
+                                </ol>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 常用命令 */}
+                          <div
+                            className={cn(
+                              'overflow-hidden transition-all duration-300 ease-out',
+                              config.includeCommands && article.commands.length > 0
+                                ? 'opacity-100 max-h-[1000px] mb-4'
+                                : 'opacity-0 max-h-0 mb-0'
+                            )}
+                          >
+                            {config.includeCommands && article.commands.length > 0 && (
+                              <div>
+                                <h3 className="text-sm font-semibold text-slate-700 mb-2">💻 常用命令</h3>
+                                <div className="space-y-2.5">
+                                  {article.commands.slice(0, 2).map((cmd, cmdIdx) => (
+                                    <div key={cmdIdx} className="rounded-lg overflow-hidden border border-slate-700/20">
+                                      <div className="bg-slate-800 px-3 py-1.5">
+                                        <p className="text-[10px] font-medium text-slate-300">{cmd.name}</p>
+                                      </div>
+                                      <div className="bg-slate-900 px-3 py-2 overflow-x-auto">
+                                        <code className="text-[10px] text-emerald-400 font-mono whitespace-pre">
+                                          {(cmd as { cmd?: string; content?: string }).cmd || (cmd as { cmd?: string; content?: string }).content || ''}
+                                        </code>
+                                      </div>
+                                      <div className="bg-slate-50 px-3 py-1.5 border-t border-slate-200">
+                                        <p className="text-[10px] text-slate-500">{cmd.description}</p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  {article.commands.length > 2 && (
+                                    <p className="text-[10px] text-slate-400 italic text-center">
+                                      ... 还有 {article.commands.length - 2} 条命令
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 历史事故 */}
+                          <div
+                            className={cn(
+                              'overflow-hidden transition-all duration-300 ease-out',
+                              config.includeIncidents && article.incidents.length > 0
+                                ? 'opacity-100 max-h-[1000px] mb-4'
+                                : 'opacity-0 max-h-0 mb-0'
+                            )}
+                          >
+                            {config.includeIncidents && article.incidents.length > 0 && (
+                              <div>
+                                <h3 className="text-sm font-semibold text-slate-700 mb-2">📅 历史事故</h3>
+                                <div className="bg-white/60 rounded-lg border border-slate-200 overflow-hidden">
+                                  <table className="w-full text-[11px]">
+                                    <thead>
+                                      <tr className="bg-slate-50">
+                                        <th className="px-2.5 py-1.5 text-left font-medium text-slate-600">日期</th>
+                                        <th className="px-2.5 py-1.5 text-left font-medium text-slate-600">标题</th>
+                                        <th className="px-2.5 py-1.5 text-left font-medium text-slate-600">影响</th>
+                                        <th className="px-2.5 py-1.5 text-left font-medium text-slate-600">时长</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {article.incidents.slice(0, 2).map((inc, incIdx) => (
+                                        <tr key={incIdx}>
+                                          <td className="px-2.5 py-1.5 text-slate-700 whitespace-nowrap">
+                                            {(inc as { date?: string; happenedAt?: string }).date || (inc as { date?: string; happenedAt?: string }).happenedAt || '-'}
+                                          </td>
+                                          <td className="px-2.5 py-1.5 text-slate-800">
+                                            {(inc as { title?: string; impact?: string }).title || (inc as { title?: string; impact?: string }).impact || '-'}
+                                          </td>
+                                          <td className="px-2.5 py-1.5 text-slate-600">
+                                            {(inc as { impact?: string; title?: string }).impact || (inc as { impact?: string; title?: string }).title || '-'}
+                                          </td>
+                                          <td className="px-2.5 py-1.5 text-slate-600 whitespace-nowrap">
+                                            {(inc as { duration?: string }).duration || '-'}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                                {article.incidents.length > 2 && (
+                                  <p className="text-[10px] text-slate-400 italic mt-1.5 text-center">
+                                    ... 还有 {article.incidents.length - 2} 条记录
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 典型案例 */}
+                          <div
+                            className={cn(
+                              'overflow-hidden transition-all duration-300 ease-out',
+                              config.includeCases && article.cases.length > 0
+                                ? 'opacity-100 max-h-[1000px] mb-4'
+                                : 'opacity-0 max-h-0 mb-0'
+                            )}
+                          >
+                            {config.includeCases && article.cases.length > 0 && (
+                              <div>
+                                <h3 className="text-sm font-semibold text-slate-700 mb-2">📁 典型案例</h3>
+                                <div className="space-y-2">
+                                  {article.cases.slice(0, 1).map((c, caseIdx) => (
+                                    <div key={caseIdx} className="bg-white/60 rounded-lg border border-slate-200 p-3">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <span className="text-xs font-semibold text-slate-800">
+                                          {(c as { title?: string }).title || `案例 ${caseIdx + 1}`}
+                                        </span>
+                                        <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">
+                                          {(c as { environment?: string }).environment || '-'}
+                                        </span>
+                                      </div>
+                                      <div className="space-y-1.5">
+                                        <div>
+                                          <p className="text-[10px] font-medium text-slate-500">问题描述</p>
+                                          <p className="text-[11px] text-slate-700 line-clamp-2">
+                                            {(c as { description?: string }).description || '-'}
+                                          </p>
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] font-medium text-slate-500">解决方案</p>
+                                          <p className="text-[11px] text-slate-700 line-clamp-2">
+                                            {(c as { solution?: string }).solution || '-'}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  {article.cases.length > 1 && (
+                                    <p className="text-[10px] text-slate-400 italic text-center">
+                                      ... 还有 {article.cases.length - 1} 个案例
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
-                      ) : (
-                        <div className="text-xs text-slate-400 italic text-center py-8">
-                          请在左侧配置中至少选择一项内容
-                        </div>
-                      )}
-                    </div>
-                  )}
+                      );
+                    })}
+
+                    {/* 剩余文章提示 */}
+                    {previewContent.remainingCount > 0 && (
+                      <div className="pt-4 border-t border-amber-200/50 text-center">
+                        <p className="text-xs text-slate-400 italic">
+                          — 还有 {previewContent.remainingCount} 篇文章未展示，完整内容请下载查看 —
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -868,6 +1135,22 @@ export default function FavoritesPage() {
           {/* Step 3: 选择导出方式 */}
           {currentStep === 3 && (
             <div className="space-y-5">
+              {/* 配置摘要条 */}
+              <div className="rounded-xl bg-teal-50/50 border border-teal-200/50 p-3.5">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle2 className="h-4 w-4 text-teal-600" />
+                  <span className="text-sm font-semibold text-teal-800">当前配置</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {config.includeSteps && <span className="text-[11px] px-2 py-0.5 bg-white rounded-full border border-teal-200 text-teal-700">排查步骤</span>}
+                  {config.includeCommands && <span className="text-[11px] px-2 py-0.5 bg-white rounded-full border border-teal-200 text-teal-700">常用命令</span>}
+                  {config.includeIncidents && <span className="text-[11px] px-2 py-0.5 bg-white rounded-full border border-teal-200 text-teal-700">历史事故</span>}
+                  {config.includeCases && <span className="text-[11px] px-2 py-0.5 bg-white rounded-full border border-teal-200 text-teal-700">典型案例</span>}
+                  {config.includeAttention && <span className="text-[11px] px-2 py-0.5 bg-white rounded-full border border-teal-200 text-teal-700">注意事项</span>}
+                  {config.includeMeta && <span className="text-[11px] px-2 py-0.5 bg-white rounded-full border border-teal-200 text-teal-700">元信息</span>}
+                </div>
+              </div>
+
               {/* 进度条 */}
               {generating && (
                 <div className="rounded-xl border border-teal-200 bg-teal-50/60 p-4">
@@ -986,6 +1269,8 @@ export default function FavoritesPage() {
                       {config.includeCommands && <span className="ml-1">命令</span>}
                       {config.includeIncidents && <span className="ml-1">事故</span>}
                       {config.includeCases && <span className="ml-1">案例</span>}
+                      {config.includeAttention && <span className="ml-1">注意事项</span>}
+                      {config.includeMeta && <span className="ml-1">元信息</span>}
                     </span>
                   </div>
                 </div>

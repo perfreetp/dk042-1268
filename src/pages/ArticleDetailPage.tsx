@@ -36,6 +36,8 @@ const serviceBadgeVariant: Record<ServiceType, 'default' | 'accent' | 'success' 
   payment: 'success',
   user: 'default',
   message: 'warning',
+  search: 'accent',
+  gateway: 'default',
   database: 'danger',
   cache: 'warning',
 };

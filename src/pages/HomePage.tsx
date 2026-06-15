@@ -27,12 +27,11 @@ import { Button } from '@/components/UI/Button';
 import StarRating from '@/components/UI/StarRating';
 import { useArticleStore } from '@/store/articleStore';
 import { mockArticles, serviceLabels as mockServiceLabels } from '@/data/mockArticles';
-import type { Article, ServiceType as MockServiceType } from '@/data/mockArticles';
+import type { Article } from '@/data/mockArticles';
+import type { ServiceType } from '@/types';
 import { cn } from '@/lib/utils';
 
-type AllServiceType = MockServiceType | 'search' | 'gateway';
-
-const serviceLabels: Record<AllServiceType, string> = {
+const serviceLabels: Record<ServiceType, string> = {
   order: '订单服务',
   payment: '支付服务',
   user: '用户服务',
@@ -43,9 +42,9 @@ const serviceLabels: Record<AllServiceType, string> = {
   cache: '缓存服务'
 };
 
-const allServices: AllServiceType[] = ['order', 'payment', 'user', 'message', 'search', 'gateway', 'database', 'cache'];
+const allServices: ServiceType[] = ['order', 'payment', 'user', 'message', 'search', 'gateway', 'database', 'cache'];
 
-const serviceIcons: Record<AllServiceType, typeof ShoppingCart> = {
+const serviceIcons: Record<ServiceType, typeof ShoppingCart> = {
   order: ShoppingCart,
   payment: CreditCard,
   user: Users,
@@ -56,11 +55,13 @@ const serviceIcons: Record<AllServiceType, typeof ShoppingCart> = {
   cache: HardDrive
 };
 
-const serviceBadgeVariant: Record<MockServiceType, 'default' | 'accent' | 'success' | 'warning' | 'danger'> = {
+const serviceBadgeVariant: Record<ServiceType, 'default' | 'accent' | 'success' | 'warning' | 'danger'> = {
   order: 'accent',
   payment: 'success',
   user: 'default',
   message: 'warning',
+  search: 'accent',
+  gateway: 'default',
   database: 'danger',
   cache: 'warning',
 };
@@ -104,7 +105,7 @@ export default function HomePage() {
   );
 
   const serviceCounts = useMemo(() => {
-    const counts: Record<AllServiceType, number> = {
+    const counts: Record<ServiceType, number> = {
       order: 0, payment: 0, user: 0, message: 0, search: 0, gateway: 0, database: 0, cache: 0
     };
     for (const a of articles) {
@@ -120,12 +121,8 @@ export default function HomePage() {
     navigate('/diagnosis');
   };
 
-  const handleServiceClick = (service: AllServiceType) => {
-    if (service === 'search' || service === 'gateway') {
-      setFilter({ service: 'all', keyword: serviceLabels[service], errorCode: '', version: '', tags: [] });
-    } else {
-      setFilter({ service, keyword: '', errorCode: '', version: '', tags: [] });
-    }
+  const handleServiceClick = (service: ServiceType) => {
+    setFilter({ service, keyword: '', errorCode: '', version: '', tags: [] });
     navigate('/diagnosis');
   };
 

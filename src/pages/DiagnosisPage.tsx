@@ -24,15 +24,13 @@ import { Button } from '@/components/UI/Button';
 import { Tag } from '@/components/UI/Tag';
 import { useArticleStore } from '@/store/articleStore';
 import { useFavoriteStore } from '@/store/favoriteStore';
-import type { SearchFilter } from '@/types';
-import type { Article, ServiceType as MockServiceType } from '@/data/mockArticles';
+import type { SearchFilter, ServiceType } from '@/types';
+import type { Article } from '@/data/mockArticles';
 import { serviceLabels as mockServiceLabels } from '@/data/mockArticles';
 import { cn } from '@/lib/utils';
 import type { SearchResultItem } from '@/utils/search';
 
-type AllServiceType = MockServiceType | 'search' | 'gateway';
-
-const serviceLabels: Record<AllServiceType, string> = {
+const serviceLabels: Record<ServiceType, string> = {
   order: '订单服务',
   payment: '支付服务',
   user: '用户服务',
@@ -43,12 +41,14 @@ const serviceLabels: Record<AllServiceType, string> = {
   cache: '缓存服务'
 };
 
-const serviceOptions: Array<{ value: MockServiceType | 'all'; label: string }> = [
+const serviceOptions: Array<{ value: ServiceType | 'all'; label: string }> = [
   { value: 'all', label: '全部服务' },
   { value: 'order', label: '订单服务' },
   { value: 'payment', label: '支付服务' },
   { value: 'user', label: '用户服务' },
   { value: 'message', label: '消息服务' },
+  { value: 'search', label: '搜索服务' },
+  { value: 'gateway', label: '网关服务' },
   { value: 'database', label: '数据库' },
   { value: 'cache', label: '缓存服务' },
 ];
@@ -69,11 +69,13 @@ const phenomenonTags = [
   '权限问题',
 ];
 
-const serviceBadgeVariant: Record<MockServiceType, 'default' | 'accent' | 'success' | 'warning' | 'danger'> = {
+const serviceBadgeVariant: Record<ServiceType, 'default' | 'accent' | 'success' | 'warning' | 'danger'> = {
   order: 'accent',
   payment: 'success',
   user: 'default',
   message: 'warning',
+  search: 'accent',
+  gateway: 'default',
   database: 'danger',
   cache: 'warning',
 };
@@ -229,7 +231,7 @@ export default function DiagnosisPage() {
     );
   };
 
-  const handleServiceSelect = (service: MockServiceType | 'all') => {
+  const handleServiceSelect = (service: ServiceType | 'all') => {
     setLocalFilter(prev => ({ ...prev, service }));
     setServiceDropdownOpen(false);
   };

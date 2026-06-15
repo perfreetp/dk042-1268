@@ -277,6 +277,9 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
         if (article) {
           const edited = editedContent?.patch;
           const now = new Date().toISOString();
+          const nowDate = new Date();
+          const dateStr = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
+          const updateRecord = `更新记录：${dateStr} 审核通过，内容由${contribution.submitter}贡献，审核人${reviewer}`;
 
           if (edited) {
             const patchData: Partial<Article> = {
@@ -288,14 +291,17 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
             if (edited.tags) patchData.tags = edited.tags;
             if (edited.title) patchData.title = edited.title;
             if (edited.phenomenon) patchData.phenomenon = edited.phenomenon;
-            if (edited.attention !== undefined) patchData.attention = edited.attention;
             if (edited.steps) patchData.steps = edited.steps;
             if (edited.commands) patchData.commands = edited.commands;
+
+            const baseAttention = edited.attention !== undefined ? edited.attention : article.attention;
+            patchData.attention = baseAttention
+              ? `${baseAttention}\n${updateRecord}`
+              : updateRecord;
 
             articleStore.updateArticle(contribution.articleId, patchData);
           } else {
             const newTitle = contribution.title.replace(/^更新：/, '');
-            const updateRecord = `[${now}] 审核通过更新：${contribution.summary} (审核人：${reviewer})`;
             const newAttention = article.attention
               ? `${article.attention}\n${updateRecord}`
               : updateRecord;

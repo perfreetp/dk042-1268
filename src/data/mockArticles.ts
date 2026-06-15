@@ -1,4 +1,4 @@
-export type ServiceType = 'order' | 'payment' | 'user' | 'message' | 'database' | 'cache';
+export type ServiceType = 'order' | 'payment' | 'user' | 'message' | 'search' | 'gateway' | 'database' | 'cache';
 
 export interface Step {
   title: string;
@@ -448,6 +448,82 @@ export const mockArticles: Article[] = [
       { title: '直播带货秒杀商品缓存击穿', environment: '生产-全量', description: '某头部主播带货商品，缓存失效时瞬间10万QPS打到MySQL，连接池被瞬间耗尽。', solution: '秒杀商品Key物理永不过期，库存变更通过MQ异步更新缓存，前端接入CDN做第一层缓存。' },
       { title: '本地缓存与Redis双写不一致', environment: '生产-应用层', description: '为防止击穿接入Caffeine本地缓存，但各节点更新时序不一致，部分节点读到脏数据。', solution: '本地缓存设置极短TTL（500ms），或通过Redis Pub/Sub广播失效事件通知各节点清理本地缓存。' }
     ]
+  },
+  {
+    id: 'ART-012',
+    title: '搜索服务超时与索引损坏排查指南',
+    service: 'search',
+    errorCodes: ['SRCH-503', 'SRCH-408'],
+    versions: ['v2.x', 'v3.x'],
+    phenomenon: '搜索接口响应时间显著增加，部分请求返回503服务不可用或408超时。搜索结果数量异常减少，关键词匹配不准确，严重时完全无法搜索。ES集群监控显示CPU/内存使用率飙升，节点出现脱离集群的情况。',
+    attention: '重建索引前务必备份数据快照，避免数据丢失。滚动重启集群时注意控制节奏，防止数据迁移风暴加重集群负担。',
+    tags: ['搜索', 'Elasticsearch', '超时', '索引损坏', '高可用'],
+    viewCount: 2876,
+    ratingAvg: 4.6,
+    ratingCount: 143,
+    createdAt: '2025-04-20T09:00:00Z',
+    updatedAt: '2026-02-18T11:30:00Z',
+    author: '林峰',
+    steps: [
+      { title: '确认集群健康状态', description: '通过_cat/health API查看集群状态（green/yellow/red），确认是单节点问题还是集群级故障。' },
+      { title: '检查节点资源占用', description: '查看各节点的CPU、内存、磁盘IO和使用率，定位是否有节点资源耗尽导致响应变慢。' },
+      { title: '分析慢查询日志', description: '开启ES慢查询日志（search slow log），分析耗时较长的查询语句，识别是否有不合理的查询或聚合。' },
+      { title: '检查索引状态', description: '通过_cat/indices查看各索引状态、文档数、分片分布，确认是否有索引损坏或分片未分配。' },
+      { title: '执行应急恢复', description: '若为单节点故障，将该节点移出集群，流量切到健康节点；若为索引损坏，从最近快照恢复或重建索引。' },
+      { title: '根因分析与优化', description: '分析故障根因（查询性能、数据模型、集群规格、分片策略），制定长期优化方案。' }
+    ],
+    commands: [
+      { name: '查看ES集群健康状态', cmd: "curl -s 'http://es-search.example.com:9200/_cat/health?v'", description: '查看集群整体健康状态、节点数、分片分布等信息' },
+      { name: '查看索引列表与状态', cmd: "curl -s 'http://es-search.example.com:9200/_cat/indices?v&s=index'", description: '列出所有索引及其状态、文档数、存储大小' },
+      { name: '查看节点资源使用情况', cmd: "curl -s 'http://es-search.example.com:9200/_cat/nodes?v&h=name,heap.percent,ram.percent,cpu,disk.used_percent'", description: '查看各节点的堆内存、物理内存、CPU、磁盘使用率' },
+      { name: '重建损坏索引', cmd: "curl -X POST 'http://es-search.example.com:9200/product_index/_reindex' -H 'Content-Type: application/json' -d '{\"source\":{\"index\":\"product_index_backup\"},\"dest\":{\"index\":\"product_index\"}}'", description: '从备份索引重建目标索引（需先确认备份存在）' }
+    ],
+    incidents: [
+      { date: '2025-09-30', title: '国庆大促搜索量激增导致ES集群超时', impact: '搜索接口超时率达28%，部分商品无法被搜到', duration: '1小时20分钟' },
+      { date: '2025-07-12', title: '磁盘空间耗尽导致索引分片损坏', impact: '订单搜索功能不可用，后台系统无法查询订单', duration: '2小时10分钟' }
+    ],
+    cases: [
+      { title: '深分页查询导致内存溢出', environment: '生产-搜索集群', description: '运营后台使用from+size深度分页查询，当页数超过1000时ES节点内存占用飙升，频繁触发Full GC。', solution: '改为search_after游标分页，限制最大查询深度，后台导出功能改用scroll API。' },
+      { title: '冷热数据未分层导致查询变慢', environment: '生产-全量', description: '所有数据放在同一索引中，随着数据量增长，查询性能逐月下降。', solution: '按时间滚动创建索引（每日/每周），配置ILM策略自动将冷数据迁移到温节点，历史数据定期归档。' }
+    ]
+  },
+  {
+    id: 'ART-013',
+    title: 'API网关限流熔断异常处理',
+    service: 'gateway',
+    errorCodes: ['GWY-429', 'GWY-502'],
+    versions: ['v2.x', 'v3.x'],
+    phenomenon: '大量请求返回429 Too Many Requests，正常业务请求被限流拦截。部分服务出现502 Bad Gateway，网关与下游服务连接中断。监控显示网关QPS异常波动，熔断指标频繁触发。',
+    attention: '调整限流阈值前需评估下游服务承载能力，避免一放宽就把下游打挂。紧急恢复时优先保障核心业务接口，非核心接口可临时降级。',
+    tags: ['网关', '限流', '熔断', 'Spring Cloud Gateway', '高可用'],
+    viewCount: 3158,
+    ratingAvg: 4.7,
+    ratingCount: 167,
+    createdAt: '2025-05-15T14:20:00Z',
+    updatedAt: '2026-01-30T10:45:00Z',
+    author: '赵海涛',
+    steps: [
+      { title: '确认故障范围', description: '查看网关监控面板，确认是全局限流还是特定接口限流，是单节点问题还是集群问题。' },
+      { title: '检查限流配置', description: '核对当前限流阈值、时间窗口、漏桶/令牌桶参数是否合理，是否因配置变更导致误限流。' },
+      { title: '排查下游服务状态', description: '检查被熔断的下游服务健康状态，确认是真的不可用还是响应变慢触发了熔断。' },
+      { title: '分析异常流量', description: '查看访问日志，确认是否有异常流量（爬虫、攻击、脚本）导致限流被触发。' },
+      { title: '执行应急处置', description: '对核心接口临时放宽限流阈值；对异常IP/UA进行封禁；对故障下游服务手动降级或切换备用服务。' },
+      { title: '根因分析与优化', description: '分析流量突增原因，优化限流策略，完善多级限流（网关层+服务层+资源层）机制。' }
+    ],
+    commands: [
+      { name: '查看网关限流统计', cmd: "curl -s 'http://gateway-admin.example.com/actuator/gateway/routefilters' | jq '.[] | select(.filters[] | contains(\"RequestRateLimiter\"))'", description: '查看配置了限流过滤器的路由及其状态' },
+      { name: '查看熔断状态', cmd: "curl -s 'http://gateway-admin.example.com/actuator/circuitbreakerevents' | jq -s 'group_by(.circuitBreakerName) | map({name: .[0].circuitBreakerName, count: length, events: .[:5]})'", description: '查看各熔断实例的状态和事件记录' },
+      { name: '统计429请求分布', cmd: "grep ' 429 ' /var/log/nginx/gateway-access.log | awk '{print $7}' | sort | uniq -c | sort -rn | head -20", description: '统计返回429最多的接口路径' },
+      { name: '重启网关节点', cmd: 'kubectl rollout restart deployment/gateway-service -n production', description: '滚动重启网关服务（K8s环境）' }
+    ],
+    incidents: [
+      { date: '2025-12-12', title: '双12活动开场流量超预期导致网关限流', impact: '约30%用户请求被限流，活动转化率下降', duration: '45分钟' },
+      { date: '2025-08-22', title: '订单服务异常引发网关级联熔断', impact: '所有依赖订单服务的接口不可用，用户无法下单', duration: '1小时15分钟' }
+    ],
+    cases: [
+      { title: '单IP爬虫触发全局限流', environment: '生产-网关层', description: '某竞品爬虫高频抓取商品列表，触发IP级限流，但由于使用了代理IP池，导致大量正常用户也被误伤。', solution: '细化限流粒度，区分IP限流、用户限流、接口限流，引入风控系统识别异常流量。' },
+      { title: '熔断配置不合理导致服务雪崩', environment: '预发环境', description: '熔断的滑动窗口过小、错误率阈值过低，下游服务偶发超时就触发熔断，放大了故障影响。', solution: '调整熔断参数：错误率阈值从30%提至60%，滑动窗口从10秒增至30秒，增加慢调用比例熔断作为补充。' }
+    ]
   }
 ];
 
@@ -456,6 +532,8 @@ export const serviceLabels: Record<ServiceType, string> = {
   payment: '支付服务',
   user: '用户服务',
   message: '消息服务',
+  search: '搜索服务',
+  gateway: '网关服务',
   database: '数据库',
   cache: '缓存'
 };
