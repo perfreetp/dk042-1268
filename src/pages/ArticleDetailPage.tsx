@@ -29,7 +29,7 @@ import { useReviewStore } from '@/store/reviewStore';
 import type { Article, ServiceType } from '@/data/mockArticles';
 import type { Step, Command, Rating } from '@/types';
 import { serviceLabels } from '@/data/mockArticles';
-import { cn } from '@/lib/utils';
+import { cn, formatRelativeTime } from '@/lib/utils';
 
 const serviceBadgeVariant: Record<ServiceType, 'default' | 'accent' | 'success' | 'warning' | 'danger'> = {
   order: 'accent',
@@ -278,6 +278,42 @@ export default function ArticleDetailPage() {
               {article.versions.map((v) => (
                 <Badge key={v} variant="default">{v}</Badge>
               ))}
+              {article.source === 'contribution' ? (
+                <Badge variant="success">
+                  用户贡献
+                </Badge>
+              ) : (
+                <Badge variant="default">
+                  知识库初始收录
+                </Badge>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-600">
+              {article.source === 'contribution' && article.contributor && (
+                <div className="flex items-center gap-1.5">
+                  <User className="h-4 w-4 text-slate-400" />
+                  <span>贡献人：<span className="font-medium text-slate-700">{article.contributor}</span></span>
+                </div>
+              )}
+              {article.reviewer && (
+                <div className="flex items-center gap-1.5">
+                  <User className="h-4 w-4 text-slate-400" />
+                  <span>审核人：<span className="font-medium text-slate-700">{article.reviewer}</span></span>
+                </div>
+              )}
+              {article.lastReviewedAt && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-4 w-4 text-slate-400" />
+                  <span>最近审核：{formatRelativeTime(article.lastReviewedAt)}</span>
+                </div>
+              )}
+              {article.firstPublishedAt && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-4 w-4 text-slate-400" />
+                  <span>首次发布：{formatRelativeTime(article.firstPublishedAt)}</span>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-5 text-sm text-slate-600">

@@ -44,6 +44,11 @@ export interface Article {
   commands: Command[];
   incidents: Incident[];
   cases: Case[];
+  source?: 'initial' | 'contribution';
+  contributor?: string;
+  reviewer?: string;
+  firstPublishedAt?: string;
+  lastReviewedAt?: string;
 }
 
 export const mockArticles: Article[] = [
@@ -62,6 +67,9 @@ export const mockArticles: Article[] = [
     createdAt: '2025-09-15T10:30:00Z',
     updatedAt: '2026-01-20T14:22:00Z',
     author: '张伟',
+    source: 'initial',
+    firstPublishedAt: '2026-03-15T10:00:00.000Z',
+    lastReviewedAt: '2026-05-20T14:30:00.000Z',
     steps: [
       { title: '确认超时范围', description: '通过APM系统查看近30分钟订单创建接口的错误分布，确认是全量还是部分用户受影响，区分机房、服务实例维度。' },
       { title: '检查数据库状态', description: '登录数据库监控平台，查看订单库CPU、IOPS、连接数指标，确认是否存在慢查询或锁等待。' },
@@ -99,6 +107,9 @@ export const mockArticles: Article[] = [
     createdAt: '2025-07-22T09:15:00Z',
     updatedAt: '2025-12-10T16:45:00Z',
     author: '李娜',
+    source: 'initial',
+    firstPublishedAt: '2026-03-22T09:30:00.000Z',
+    lastReviewedAt: '2026-04-18T11:20:00.000Z',
     steps: [
       { title: '采集异常订单信息', description: '收集用户提供的订单号、支付凭证、截图，通过订单管理后台查询订单当前状态和流转历史。' },
       { title: '多数据源交叉比对', description: '比对订单库、支付流水、物流系统、MQ消息记录，确定真实的业务状态和数据库状态差异点。' },
@@ -132,6 +143,9 @@ export const mockArticles: Article[] = [
     createdAt: '2025-06-10T11:00:00Z',
     updatedAt: '2026-02-05T08:30:00Z',
     author: '王磊',
+    source: 'initial',
+    firstPublishedAt: '2026-03-08T14:00:00.000Z',
+    lastReviewedAt: '2026-05-10T16:45:00.000Z',
     steps: [
       { title: '确认支付状态', description: '登录第三方支付商户后台，通过商户订单号查询交易状态，确认用户是否已真实扣款。' },
       { title: '排查回调链路', description: '检查Nginx访问日志确认回调请求是否到达，查看支付服务日志确认回调处理是否抛异常。' },
@@ -169,6 +183,9 @@ export const mockArticles: Article[] = [
     createdAt: '2025-04-18T14:20:00Z',
     updatedAt: '2026-01-15T10:10:00Z',
     author: '赵敏',
+    source: 'initial',
+    firstPublishedAt: '2026-04-02T11:15:00.000Z',
+    lastReviewedAt: '2026-05-28T09:00:00.000Z',
     steps: [
       { title: '核实重复支付事实', description: '收集订单号、用户手机号，在支付后台查询该订单的所有支付流水，确认支付渠道、金额、时间。' },
       { title: '判断重复原因', description: '分析支付请求日志，区分是用户重复点击、前端BUG、接口重试还是第三方支付异步通知问题。' },
@@ -204,6 +221,9 @@ export const mockArticles: Article[] = [
     createdAt: '2025-08-01T13:40:00Z',
     updatedAt: '2025-12-28T09:55:00Z',
     author: '陈强',
+    source: 'initial',
+    firstPublishedAt: '2026-03-28T08:45:00.000Z',
+    lastReviewedAt: '2026-04-25T15:30:00.000Z',
     steps: [
       { title: '确认问题范围', description: '查看监控大盘，判断是全量登录异常还是特定渠道（APP/小程序/H5）、特定运营商、特定地区用户。' },
       { title: '区分故障类型', description: '根据错误码判断是账号密码错误、验证码发送失败、第三方登录授权失败、风控拦截还是Session问题。' },
@@ -240,6 +260,8 @@ export const mockArticles: Article[] = [
     createdAt: '2025-05-28T16:00:00Z',
     updatedAt: '2025-11-30T11:20:00Z',
     author: '刘洋',
+    source: 'initial',
+    firstPublishedAt: '2026-04-15T13:20:00.000Z',
     steps: [
       { title: '确认Token类型和有效期', description: '抓取用户请求的Authorization头，解析JWT的exp字段，确认Access Token和Refresh Token的实际有效期。' },
       { title: '检查时钟同步', description: '验证JWT签发服务、网关、各业务服务器的系统时间是否一致，NTP服务是否正常。' },
@@ -275,6 +297,9 @@ export const mockArticles: Article[] = [
     createdAt: '2025-03-12T08:45:00Z',
     updatedAt: '2025-09-25T15:30:00Z',
     author: '孙浩',
+    source: 'initial',
+    firstPublishedAt: '2026-03-05T10:30:00.000Z',
+    lastReviewedAt: '2026-05-15T14:00:00.000Z',
     steps: [
       { title: '确认延迟范围', description: '通过消息ID查询推送链路各节点时间戳，区分是产生延迟、MQ积压、推送服务处理慢还是第三方平台延迟。' },
       { title: '检查消息队列', description: '查看Kafka/RabbitMQ消费组Lag值，确认消费速率，分析是否有消费异常或阻塞。' },
@@ -312,6 +337,9 @@ export const mockArticles: Article[] = [
     createdAt: '2025-02-20T10:15:00Z',
     updatedAt: '2026-02-10T13:40:00Z',
     author: '周芳',
+    source: 'initial',
+    firstPublishedAt: '2026-04-20T09:00:00.000Z',
+    lastReviewedAt: '2026-06-02T11:30:00.000Z',
     steps: [
       { title: '确认失败类型', description: '查看短信发送记录的错误码，区分是提交失败（平台拒收）还是回执失败（运营商投递失败）。' },
       { title: '检查账户与签名', description: '登录运营商/短信平台控制台，检查账户余额、短信签名、模板审核状态，确认是否被封禁。' },
@@ -350,6 +378,9 @@ export const mockArticles: Article[] = [
     createdAt: '2025-01-05T09:00:00Z',
     updatedAt: '2026-02-12T17:15:00Z',
     author: '吴斌',
+    source: 'initial',
+    firstPublishedAt: '2026-03-18T14:45:00.000Z',
+    lastReviewedAt: '2026-05-05T16:20:00.000Z',
     steps: [
       { title: '确认连接耗尽', description: '登录数据库执行show processlist，查看连接数、状态分布、执行时间最长的查询。' },
       { title: '识别异常连接', description: '区分是正常业务峰值还是异常连接，关注Sleep状态过长的连接、长时间执行的SQL、来自异常IP的连接。' },
@@ -388,6 +419,9 @@ export const mockArticles: Article[] = [
     createdAt: '2024-12-10T10:30:00Z',
     updatedAt: '2026-02-08T14:00:00Z',
     author: '郑凯',
+    source: 'initial',
+    firstPublishedAt: '2026-04-08T08:30:00.000Z',
+    lastReviewedAt: '2026-06-10T10:15:00.000Z',
     steps: [
       { title: '定位Top慢查询', description: '开启慢查询日志，设置long_query_time=1，使用pt-query-digest分析慢日志，按执行次数、总耗时、锁等待时间排序。' },
       { title: '分析执行计划', description: '对高频慢查询执行EXPLAIN，关注type（是否走索引）、rows（扫描行数）、Extra（是否有Using filesort/temporary）。' },
@@ -426,6 +460,9 @@ export const mockArticles: Article[] = [
     createdAt: '2025-03-01T11:30:00Z',
     updatedAt: '2026-01-25T16:50:00Z',
     author: '黄磊',
+    source: 'initial',
+    firstPublishedAt: '2026-03-30T15:00:00.000Z',
+    lastReviewedAt: '2026-04-28T13:45:00.000Z',
     steps: [
       { title: '识别热点Key', description: '通过Redis MONITOR、hotkeys参数、或客户端埋点统计访问频次最高的Key列表。' },
       { title: '确认失效模式', description: '查看这些热点Key的TTL设置，是否集中在同一时间过期，过期时间是否过短。' },
@@ -464,6 +501,8 @@ export const mockArticles: Article[] = [
     createdAt: '2025-04-20T09:00:00Z',
     updatedAt: '2026-02-18T11:30:00Z',
     author: '林峰',
+    source: 'initial',
+    firstPublishedAt: '2026-04-12T10:45:00.000Z',
     steps: [
       { title: '确认集群健康状态', description: '通过_cat/health API查看集群状态（green/yellow/red），确认是单节点问题还是集群级故障。' },
       { title: '检查节点资源占用', description: '查看各节点的CPU、内存、磁盘IO和使用率，定位是否有节点资源耗尽导致响应变慢。' },
@@ -502,6 +541,9 @@ export const mockArticles: Article[] = [
     createdAt: '2025-05-15T14:20:00Z',
     updatedAt: '2026-01-30T10:45:00Z',
     author: '赵海涛',
+    source: 'initial',
+    firstPublishedAt: '2026-05-02T12:30:00.000Z',
+    lastReviewedAt: '2026-06-08T09:15:00.000Z',
     steps: [
       { title: '确认故障范围', description: '查看网关监控面板，确认是全局限流还是特定接口限流，是单节点问题还是集群问题。' },
       { title: '检查限流配置', description: '核对当前限流阈值、时间窗口、漏桶/令牌桶参数是否合理，是否因配置变更导致误限流。' },

@@ -26,31 +26,20 @@ import { useArticleStore } from '@/store/articleStore';
 import { useFavoriteStore } from '@/store/favoriteStore';
 import type { SearchFilter, ServiceType } from '@/types';
 import type { Article } from '@/data/mockArticles';
-import { serviceLabels as mockServiceLabels } from '@/data/mockArticles';
+import { serviceLabels } from '@/data/mockArticles';
 import { cn } from '@/lib/utils';
 import type { SearchResultItem } from '@/utils/search';
 
-const serviceLabels: Record<ServiceType, string> = {
-  order: '订单服务',
-  payment: '支付服务',
-  user: '用户服务',
-  message: '消息服务',
-  search: '搜索服务',
-  gateway: '网关服务',
-  database: '数据库',
-  cache: '缓存服务'
-};
-
 const serviceOptions: Array<{ value: ServiceType | 'all'; label: string }> = [
   { value: 'all', label: '全部服务' },
-  { value: 'order', label: '订单服务' },
-  { value: 'payment', label: '支付服务' },
-  { value: 'user', label: '用户服务' },
-  { value: 'message', label: '消息服务' },
-  { value: 'search', label: '搜索服务' },
-  { value: 'gateway', label: '网关服务' },
-  { value: 'database', label: '数据库' },
-  { value: 'cache', label: '缓存服务' },
+  { value: 'order', label: serviceLabels.order },
+  { value: 'payment', label: serviceLabels.payment },
+  { value: 'user', label: serviceLabels.user },
+  { value: 'message', label: serviceLabels.message },
+  { value: 'search', label: serviceLabels.search },
+  { value: 'gateway', label: serviceLabels.gateway },
+  { value: 'database', label: serviceLabels.database },
+  { value: 'cache', label: serviceLabels.cache },
 ];
 
 const versionOptions = [
@@ -191,6 +180,11 @@ export default function DiagnosisPage() {
   const [errorCodeInput, setErrorCodeInput] = useState(filter.errorCode ?? '');
   const [diagnosisSelections, setDiagnosisSelections] = useState<Record<number, string>>({});
   const [localFilter, setLocalFilter] = useState<SearchFilter>({ ...filter });
+  const [filterSource, setFilterSource] = useState<{ name: string; timeRange?: string } | null>(
+    filter.source === 'dashboard'
+      ? { name: '运营看板', timeRange: filter.timeRangeLabel }
+      : null
+  );
 
   useEffect(() => {
     setFilter({
@@ -199,6 +193,11 @@ export default function DiagnosisPage() {
       errorCode: errorCodeInput || undefined,
     });
   }, [localFilter, selectedPhenomena, errorCodeInput, setFilter]);
+
+  const clearFilterSource = () => {
+    setFilterSource(null);
+    setFilter({ source: undefined, timeRangeLabel: undefined });
+  };
 
   const results = useMemo(() => getFilteredArticles(), [getFilteredArticles]);
 
@@ -229,16 +228,19 @@ export default function DiagnosisPage() {
         ? prev.filter(t => t !== tag)
         : [...prev, tag]
     );
+    clearFilterSource();
   };
 
   const handleServiceSelect = (service: ServiceType | 'all') => {
     setLocalFilter(prev => ({ ...prev, service }));
     setServiceDropdownOpen(false);
+    clearFilterSource();
   };
 
   const handleVersionSelect = (version: string) => {
     setLocalFilter(prev => ({ ...prev, version: version || undefined }));
     setVersionDropdownOpen(false);
+    clearFilterSource();
   };
 
   const handleResetFilters = () => {
@@ -259,6 +261,7 @@ export default function DiagnosisPage() {
       version: '',
       tags: [],
     });
+    clearFilterSource();
   };
 
   const handleDiagnosisSelect = (stepId: number, value: string) => {
@@ -304,9 +307,19 @@ export default function DiagnosisPage() {
           )}
         >
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Filter className="h-4 w-4 text-slate-500" />
               <span className="text-sm font-medium text-slate-700">筛选条件</span>
+              {filterSource && (
+                <button
+                  onClick={() => navigate('/dashboard')}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-teal-50 text-teal-700 border border-teal-200 text-xs font-medium hover:bg-teal-100 transition-colors"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  来自{filterSource.name}
+                  {filterSource.timeRange && ` · ${filterSource.timeRange}`}
+                </button>
+              )}
             </div>
 
             {/* Phenomenon Tags */}
@@ -395,7 +408,10 @@ export default function DiagnosisPage() {
                   <input
                     type="text"
                     value={errorCodeInput}
-                    onChange={(e) => setErrorCodeInput(e.target.value)}
+                    onChange={(e) => {
+                      setErrorCodeInput(e.target.value);
+                      clearFilterSource();
+                    }}
                     placeholder="如: ORD-5001"
                     className="ml-2 bg-transparent text-sm text-slate-900 placeholder-slate-400 outline-none w-32"
                   />
@@ -665,7 +681,7 @@ export default function DiagnosisPage() {
                       <div className="mb-3">
                         <div className="flex items-start gap-3">
                           <Badge variant={serviceBadgeVariant[article.service]}>
-                            {mockServiceLabels[article.service as keyof typeof mockServiceLabels] || serviceLabels[article.service]}
+                            {serviceLabels[article.service]}
                           </Badge>
                           {article.versions.slice(0, 2).map(v => (
                             <Badge key={v} variant="default">{v}</Badge>

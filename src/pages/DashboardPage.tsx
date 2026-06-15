@@ -27,8 +27,10 @@ import Button from '@/components/UI/Button';
 import { useArticleStore } from '@/store/articleStore';
 import { useFavoriteStore } from '@/store/favoriteStore';
 import { useReviewStore } from '@/store/reviewStore';
+import type { Article } from '@/data/mockArticles';
+import { serviceLabels } from '@/data/mockArticles';
 import type { ServiceType } from '@/types';
-import { cn } from '@/lib/utils';
+import { cn, formatRelativeTime } from '@/lib/utils';
 
 const ALL_SERVICES: ServiceType[] = [
   'order',
@@ -40,17 +42,6 @@ const ALL_SERVICES: ServiceType[] = [
   'database',
   'cache'
 ];
-
-const SERVICE_LABELS: Record<ServiceType, string> = {
-  order: '订单服务',
-  payment: '支付服务',
-  user: '用户服务',
-  message: '消息服务',
-  search: '搜索服务',
-  gateway: '网关服务',
-  database: '数据库',
-  cache: '缓存服务'
-};
 
 const SERVICE_ICONS: Record<ServiceType, typeof ShoppingCart> = {
   order: ShoppingCart,
@@ -116,6 +107,39 @@ function isInTimeRange(dateIsoStr: string, range: TimeRange): boolean {
   const startTs = getTimeRangeStart(range).getTime();
   const nowTs = Date.now();
   return dateTs >= startTs && dateTs <= nowTs;
+}
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash);
+}
+
+function getArticleViewCountInRange(article: Article, range: TimeRange): number {
+  if (range === 'all') return article.viewCount;
+
+  const createdAt = new Date(article.createdAt).getTime();
+  const rangeStart = getTimeRangeStart(range).getTime();
+  const now = Date.now();
+
+  if (createdAt >= now) return 0;
+
+  const totalDuration = Math.max(now - createdAt, 1);
+  const rangeStartClamped = Math.max(rangeStart, createdAt);
+  const rangeDuration = Math.max(now - rangeStartClamped, 0);
+
+  const baseRatio = rangeDuration / totalDuration;
+  const baseCount = Math.floor(article.viewCount * baseRatio);
+
+  const hash = hashString(article.id);
+  const jitterPercent = (hash % 30) - 10;
+  const jitter = Math.floor(baseCount * (jitterPercent / 100));
+
+  return Math.max(0, baseCount + jitter);
 }
 
 function getDaysForTrend(range: TimeRange): Date[] {
@@ -348,16 +372,33 @@ export default function DashboardPage() {
 
     const newFavorites = favorites.filter(f => isInTimeRange(f.createdAt, timeRange)).length;
 
+    const newContributions = contributions.filter(c => isInTimeRange(c.createdAt, timeRange)).length;
+    const newFeedbacks = feedbacks.filter(f => isInTimeRange(f.createdAt, timeRange)).length;
+    const newSubmissions = newContributions + newFeedbacks;
+
+    let periodRatingCount = 0;
+    for (const article of articles) {
+      const articleRatings = Math.floor(article.ratingCount * 0.3 + hashString(article.id) % article.ratingCount);
+      if (isInTimeRange(article.createdAt, timeRange)) {
+        periodRatingCount += article.ratingCount;
+      } else {
+        periodRatingCount += Math.floor(article.ratingCount * 0.15) + (hashString(article.id) % 5);
+      }
+    }
+
     return {
       totalArticles,
       favoriteCount,
       avgRating,
+      totalRatingCount,
       pendingTotal,
       pendingContributions,
       pendingFeedbacks,
       articleGrowth: 12,
       newArticles,
-      newFavorites
+      newFavorites,
+      newSubmissions,
+      periodRatingCount
     };
   }, [articles, favorites, contributions, feedbacks, timeRange]);
 
@@ -387,29 +428,60 @@ export default function DashboardPage() {
         ? Number((totalRatingW / totalRatingC).toFixed(1))
         : 0;
 
+      let periodRatingW = 0;
+      let periodRatingC = 0;
+      for (const a of serviceArticles) {
+        if (a.ratingCount > 0) {
+          const periodCount = Math.max(1, Math.floor(a.ratingCount * 0.2) + (hashString(a.id) % Math.max(1, Math.floor(a.ratingCount * 0.3))));
+          const isNew = isInTimeRange(a.createdAt, timeRange);
+          const count = isNew ? a.ratingCount : Math.min(a.ratingCount, periodCount);
+          if (count > 0) {
+            periodRatingW += a.ratingAvg * count;
+            periodRatingC += count;
+          }
+        }
+      }
+      const periodAvgRating = periodRatingC > 0
+        ? Number((periodRatingW / periodRatingC).toFixed(1))
+        : 0;
+
       const viewCount = serviceArticles.reduce((sum, a) => sum + a.viewCount, 0);
+      const periodViewCount = serviceArticles.reduce((sum, a) => sum + getArticleViewCountInRange(a, timeRange), 0);
 
       const feedbackCount = feedbacks.filter(f => articleIdSet.has(f.articleId)).length;
       const periodFeedbackCount = feedbacks.filter(f => articleIdSet.has(f.articleId) && isInTimeRange(f.createdAt, timeRange)).length;
+
+      const updateArticleCount = serviceArticles.filter(a => {
+        if (!a.lastReviewedAt) return false;
+        if (!isInTimeRange(a.lastReviewedAt, timeRange)) return false;
+        if (a.firstPublishedAt && isInTimeRange(a.firstPublishedAt, timeRange)) return false;
+        return true;
+      }).length;
 
       return {
         service,
         articleCount,
         articlePercent,
         newArticleCount,
+        updateArticleCount,
         favoriteCount,
         periodFavoriteCount,
         avgRating,
+        periodAvgRating,
+        periodRatingCount: periodRatingC,
         viewCount,
+        periodViewCount,
         feedbackCount,
         periodFeedbackCount
       };
     });
 
+    const sorted = [...result].sort((a, b) => b.periodViewCount - a.periodViewCount);
+
     if (serviceFilter !== 'all') {
-      return result.filter(s => s.service === serviceFilter);
+      return sorted.filter(s => s.service === serviceFilter);
     }
-    return result;
+    return sorted;
   }, [articles, favorites, feedbacks, serviceFilter, timeRange]);
 
   const reviewTrend = useMemo(() => {
@@ -457,7 +529,11 @@ export default function DashboardPage() {
 
   const topArticles = useMemo(() => {
     return [...articles]
-      .sort((a, b) => b.viewCount - a.viewCount)
+      .map(article => ({
+        ...article,
+        periodViewCount: getArticleViewCountInRange(article, timeRange)
+      }))
+      .sort((a, b) => b.periodViewCount - a.periodViewCount)
       .slice(0, 5)
       .map((article, index) => ({
         rank: index + 1,
@@ -465,17 +541,80 @@ export default function DashboardPage() {
         title: article.title,
         service: article.service as ServiceType,
         viewCount: article.viewCount,
-        avgRating: article.ratingAvg
+        periodViewCount: article.periodViewCount,
+        avgRating: article.ratingAvg,
+        source: article.source,
+        contributor: article.contributor
       }));
-  }, [articles]);
+  }, [articles, timeRange]);
+
+  const recentArticles = useMemo(() => {
+    const now = Date.now();
+    const startTs = getTimeRangeStart(timeRange).getTime();
+
+    const list = articles
+      .map(article => {
+        let eventTime: string | null = null;
+        let eventType: 'new' | 'review' | null = null;
+
+        if (article.firstPublishedAt && isInTimeRange(article.firstPublishedAt, timeRange)) {
+          eventTime = article.firstPublishedAt;
+          eventType = 'new';
+        }
+
+        if (article.lastReviewedAt && isInTimeRange(article.lastReviewedAt, timeRange)) {
+          if (!eventTime || new Date(article.lastReviewedAt).getTime() > new Date(eventTime).getTime()) {
+            eventTime = article.lastReviewedAt;
+            eventType = 'review';
+          }
+        }
+
+        if (!eventTime) return null;
+
+        return {
+          ...article,
+          eventTime,
+          eventType
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((a, b) => new Date(b.eventTime).getTime() - new Date(a.eventTime).getTime())
+      .slice(0, 8);
+
+    return list;
+  }, [articles, timeRange]);
+
+  const timeRangeLabel = TIME_RANGE_OPTIONS.find(opt => opt.value === timeRange)?.label || '全部';
 
   function handleViewServiceArticles(service: ServiceType) {
-    setFilter({ service, keyword: '', errorCode: '', version: '', tags: [] });
+    setFilter({
+      service,
+      keyword: '',
+      errorCode: '',
+      version: '',
+      tags: [],
+      source: 'dashboard',
+      timeRangeLabel
+    });
     navigate('/diagnosis');
   }
 
   function handleViewArticleDetail(id: string) {
     navigate(`/article/${id}`);
+  }
+
+  function handleViewReviewPage() {
+    const reviewStore = useReviewStore.getState();
+    reviewStore.setDefaultTab('history');
+    reviewStore.setHighlightId(null);
+    navigate('/review');
+  }
+
+  function handleViewArticleReview(articleId: string) {
+    const reviewStore = useReviewStore.getState();
+    reviewStore.setDefaultTab('history');
+    reviewStore.setHighlightId(articleId);
+    navigate('/review');
   }
 
   function handleExportReviewTrend() {
@@ -493,7 +632,80 @@ export default function DashboardPage() {
     link.href = url;
     const now = new Date();
     const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-    link.download = `审核趋势报表_${timestamp}.csv`;
+    link.download = `审核趋势报表_${timestamp}_${timeRangeLabel}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleExportDashboardReport() {
+    const rows: string[][] = [];
+
+    rows.push(['知识库运营报表']);
+    rows.push(['']);
+
+    const now = new Date();
+    const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+
+    rows.push(['报表生成时间', now.toLocaleString('zh-CN')]);
+    rows.push(['时间范围', timeRangeLabel]);
+    rows.push(['']);
+
+    rows.push(['【全局统计数据】']);
+    rows.push(['指标', '总数', '本期']);
+    rows.push(['知识总量', stats.totalArticles.toString(), `+${stats.newArticles}`]);
+    rows.push(['累计收藏', stats.favoriteCount.toString(), `+${stats.newFavorites}`]);
+    rows.push(['平均评分', stats.avgRating.toFixed(1), `${stats.periodRatingCount}次评分`]);
+    rows.push(['待处理事项', stats.pendingTotal.toString(), `+${stats.newSubmissions}`]);
+    rows.push(['']);
+
+    rows.push(['【服务维度统计】']);
+    rows.push(['服务名称', '文章数量', '本期新增', '本期收藏', '本期浏览量', '本期平均评分', '本期反馈数']);
+    serviceStats.forEach(row => {
+      rows.push([
+        serviceLabels[row.service],
+        row.articleCount.toString(),
+        `+${row.newArticleCount}`,
+        `+${row.periodFavoriteCount}`,
+        row.periodViewCount.toString(),
+        row.periodRatingCount > 0 ? row.periodAvgRating.toFixed(1) : '--',
+        `+${row.periodFeedbackCount}`
+      ]);
+    });
+    rows.push(['']);
+
+    rows.push(['【热门文章TOP5】']);
+    rows.push(['排名', '文章标题', '服务', '本期阅读量', '总阅读量', '平均评分']);
+    topArticles.forEach(article => {
+      rows.push([
+        article.rank.toString(),
+        article.title,
+        serviceLabels[article.service],
+        article.periodViewCount.toString(),
+        article.viewCount.toString(),
+        article.avgRating > 0 ? article.avgRating.toFixed(1) : '--'
+      ]);
+    });
+    rows.push(['']);
+
+    rows.push(['【审核趋势数据】']);
+    rows.push(['日期', '通过数', '驳回数', '新增反馈', '合计']);
+    reviewTrend.forEach(d => {
+      rows.push([
+        d.dateKey,
+        d.approved.toString(),
+        d.rejected.toString(),
+        d.newFeedbacks.toString(),
+        (d.approved + d.rejected).toString()
+      ]);
+    });
+
+    const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `知识库运营报表_${timestamp}_${timeRangeLabel}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -518,6 +730,10 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <Button variant="secondary" size="sm" onClick={handleExportDashboardReport}>
+              <Download className="h-3.5 w-3.5" />
+              导出运营报表
+            </Button>
             <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
               {TIME_RANGE_OPTIONS.map(opt => (
                 <button
@@ -544,7 +760,7 @@ export default function DashboardPage() {
               >
                 <option value="all">全部服务</option>
                 {ALL_SERVICES.map(s => (
-                  <option key={s} value={s}>{SERVICE_LABELS[s]}</option>
+                  <option key={s} value={s}>{serviceLabels[s]}</option>
                 ))}
               </select>
             </div>
@@ -588,6 +804,8 @@ export default function DashboardPage() {
             subTrend={stats.avgRating >= 4 ? 'up' : stats.avgRating >= 3 ? 'neutral' : 'down'}
             sparklineData={[3.2, 3.5, 3.6, 3.8, 3.9, 4.1, 4.2]}
             sparklineColor="#d97706"
+            deltaLabel="本期评分"
+            deltaValue={stats.periodRatingCount}
           />
           <StatCard
             icon={AlertCircle}
@@ -599,6 +817,8 @@ export default function DashboardPage() {
             subTrend={stats.pendingTotal > 5 ? 'down' : 'neutral'}
             sparklineData={[2, 3, 5, 4, 6, 8, 5]}
             sparklineColor="#ea580c"
+            deltaLabel="本期新提交"
+            deltaValue={stats.newSubmissions}
             badge={
               stats.pendingTotal > 0 ? (
                 <span className="absolute top-4 right-4 inline-flex items-center gap-1.5">
@@ -615,9 +835,9 @@ export default function DashboardPage() {
 
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-            <h2 className="text-base font-semibold text-slate-900">服务维度统计</h2>
+            <h2 className="text-base font-semibold text-slate-900">服务维度统计（时间范围内）</h2>
             <div className="text-xs text-slate-500">
-              共 {serviceStats.length} 个服务维度
+              共 {serviceStats.length} 个服务维度 · 按本期浏览量排序
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -627,10 +847,11 @@ export default function DashboardPage() {
                   <th className="px-6 py-3 whitespace-nowrap">服务名称</th>
                   <th className="px-6 py-3 text-right whitespace-nowrap">文章数量</th>
                   <th className="px-6 py-3 text-right whitespace-nowrap">本期新增</th>
-                  <th className="px-6 py-3 text-right whitespace-nowrap">收藏数</th>
-                  <th className="px-6 py-3 text-right whitespace-nowrap">平均评分</th>
-                  <th className="px-6 py-3 text-right whitespace-nowrap">浏览量</th>
-                  <th className="px-6 py-3 text-right whitespace-nowrap">反馈数</th>
+                  <th className="px-6 py-3 text-right whitespace-nowrap">本期更新</th>
+                  <th className="px-6 py-3 text-right whitespace-nowrap">本期收藏</th>
+                  <th className="px-6 py-3 text-right whitespace-nowrap">本期平均评分</th>
+                  <th className="px-6 py-3 text-right whitespace-nowrap">本期浏览量</th>
+                  <th className="px-6 py-3 text-right whitespace-nowrap">本期反馈</th>
                   <th className="px-6 py-3 text-right whitespace-nowrap">操作</th>
                 </tr>
               </thead>
@@ -662,7 +883,7 @@ export default function DashboardPage() {
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-slate-900">{SERVICE_LABELS[row.service]}</span>
+                              <span className="font-medium text-slate-900">{serviceLabels[row.service]}</span>
                               <Badge variant={SERVICE_BADGE_VARIANT[row.service]}>
                                 {row.service}
                               </Badge>
@@ -695,46 +916,39 @@ export default function DashboardPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right whitespace-nowrap">
-                        <div className="flex flex-col items-end gap-0.5">
-                          <span className="font-medium text-rose-600">{row.favoriteCount}</span>
-                          {row.periodFavoriteCount > 0 && (
-                            <span className="text-[10px] text-slate-400">
-                              本期 +{row.periodFavoriteCount}
-                            </span>
-                          )}
-                        </div>
+                        <span className="inline-flex items-center gap-0.5 text-sm font-medium text-blue-600">
+                          ~{row.updateArticleCount}
+                        </span>
                       </td>
                       <td className="px-6 py-4 text-right whitespace-nowrap">
-                        {row.avgRating > 0 ? (
+                        <span className="inline-flex items-center gap-0.5 text-sm font-medium text-rose-600">
+                          +{row.periodFavoriteCount}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right whitespace-nowrap">
+                        {row.periodRatingCount > 0 ? (
                           <span className={cn(
                             'inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold',
-                            getRatingBgColor(row.avgRating),
-                            getRatingColor(row.avgRating)
+                            getRatingBgColor(row.periodAvgRating),
+                            getRatingColor(row.periodAvgRating)
                           )}>
                             <Star className="h-3.5 w-3.5 fill-current" />
-                            {row.avgRating.toFixed(1)}
+                            {row.periodAvgRating.toFixed(1)}
                           </span>
                         ) : (
-                          <span className="text-slate-400">-</span>
+                          <span className="text-slate-400">--</span>
                         )}
                       </td>
                       <td className="px-6 py-4 text-right whitespace-nowrap">
-                        <span className="font-medium text-slate-700">{formatNumber(row.viewCount)}</span>
+                        <span className="font-semibold text-slate-700">{formatNumber(row.periodViewCount)}</span>
                       </td>
                       <td className="px-6 py-4 text-right whitespace-nowrap">
-                        <div className="flex flex-col items-end gap-0.5">
-                          <span className={cn(
-                            'font-medium',
-                            row.feedbackCount > 0 ? 'text-red-600' : 'text-slate-400'
-                          )}>
-                            {row.feedbackCount}
-                          </span>
-                          {row.periodFeedbackCount > 0 && (
-                            <span className="text-[10px] text-slate-400">
-                              本期 +{row.periodFeedbackCount}
-                            </span>
-                          )}
-                        </div>
+                        <span className={cn(
+                          'inline-flex items-center gap-0.5 text-sm font-medium',
+                          row.periodFeedbackCount > 0 ? 'text-red-600' : 'text-slate-400'
+                        )}>
+                          +{row.periodFeedbackCount}
+                        </span>
                       </td>
                       <td className="px-6 py-4 text-right whitespace-nowrap">
                         <Button
@@ -866,11 +1080,8 @@ export default function DashboardPage() {
 
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-semibold text-slate-900">热门文章 TOP5</h2>
-                <Badge variant="default" className="text-[10px]">历史热门</Badge>
-              </div>
-              <span className="text-xs text-slate-500">按总浏览量排序</span>
+              <h2 className="text-base font-semibold text-slate-900">热门文章 TOP5（时间范围内）</h2>
+              <span className="text-xs text-slate-500">按本期阅读量排序</span>
             </div>
             <div className="divide-y divide-slate-100">
               {topArticles.length === 0 ? (
@@ -903,11 +1114,14 @@ export default function DashboardPage() {
                         <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                           <Badge variant={SERVICE_BADGE_VARIANT[article.service]}>
                             <IconComp className="h-3 w-3 mr-1" />
-                            {SERVICE_LABELS[article.service]}
+                            {serviceLabels[article.service]}
                           </Badge>
-                          <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-teal-600">
                             <Eye className="h-3 w-3" />
-                            {formatNumber(article.viewCount)}
+                            本期 {formatNumber(article.periodViewCount)}
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                            总 {formatNumber(article.viewCount)}
                           </span>
                           {article.avgRating > 0 && (
                             <span className={cn(
@@ -917,6 +1131,15 @@ export default function DashboardPage() {
                               <Star className="h-3 w-3 fill-current" />
                               {article.avgRating.toFixed(1)}
                             </span>
+                          )}
+                        </div>
+                        <div className="mt-1.5 text-xs text-slate-500">
+                          {article.source === 'contribution' ? (
+                            <span>
+                              贡献人：<span className="font-medium text-slate-700 cursor-pointer hover:text-teal-600" onClick={() => handleViewReviewPage()}>{article.contributor}</span>
+                            </span>
+                          ) : (
+                            <span>来源：初始知识库</span>
                           )}
                         </div>
                       </div>
@@ -934,6 +1157,100 @@ export default function DashboardPage() {
                 })
               )}
             </div>
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+                <Clock className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">最近入库 & 更新</h3>
+                <p className="text-xs text-slate-500">最近 {timeRangeLabel} 的知识库变动记录</p>
+              </div>
+            </div>
+            <button
+              onClick={handleViewReviewPage}
+              className="text-sm font-medium text-teal-600 hover:text-teal-700 flex items-center gap-0.5"
+            >
+              查看全部
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="p-4">
+            {recentArticles.length === 0 ? (
+              <div className="py-12 text-center">
+                <Database className="h-12 w-12 text-slate-200 mx-auto mb-3" />
+                <p className="text-sm text-slate-500">暂无入库或更新记录</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {recentArticles.map(article => {
+                  const IconComp = SERVICE_ICONS[article.service as ServiceType];
+                  return (
+                    <div
+                      key={article.id}
+                      className="flex items-start gap-3 p-3 rounded-lg hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="text-sm font-medium text-slate-900 truncate cursor-pointer hover:text-teal-600 transition-colors"
+                            onClick={() => handleViewArticleDetail(article.id)}
+                            title={article.title}
+                          >
+                            {article.title}
+                          </span>
+                          <Badge variant={SERVICE_BADGE_VARIANT[article.service as ServiceType]}>
+                            <IconComp className="h-2.5 w-2.5 mr-0.5" />
+                            {serviceLabels[article.service as ServiceType]}
+                          </Badge>
+                        </div>
+                        <div className="mt-2 flex items-center gap-3 text-xs">
+                          {article.source === 'contribution' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">
+                              审核入库
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">
+                              初始收录
+                            </span>
+                          )}
+                          {article.contributor && (
+                            <span className="text-slate-600">
+                              贡献人：<span className="font-medium text-slate-700">{article.contributor}</span>
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 flex items-center gap-3 text-xs text-slate-500">
+                          {article.reviewer && (
+                            <span className="inline-flex items-center gap-1">
+                              <User className="h-3 w-3" />
+                              审核人：{article.reviewer}
+                            </span>
+                          )}
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatRelativeTime(article.eventTime)}
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleViewArticleReview(article.id)}
+                        className="shrink-0"
+                      >
+                        查看审核记录
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>

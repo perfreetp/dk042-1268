@@ -62,6 +62,11 @@ export interface Article {
   commands: Command[];
   incidents: Incident[];
   cases: CaseItem[];
+  source?: 'initial' | 'contribution';
+  contributor?: string;
+  reviewer?: string;
+  firstPublishedAt?: string;
+  lastReviewedAt?: string;
 }
 
 export interface Rating {
@@ -112,6 +117,8 @@ export interface SearchFilter {
   errorCode?: string;
   version?: string;
   tags?: string[];
+  source?: string;
+  timeRangeLabel?: string;
 }
 
 export type FeedbackStatus = 'pending' | 'resolved' | 'rejected';

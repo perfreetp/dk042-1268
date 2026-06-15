@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Clock,
   CheckCircle2,
@@ -261,7 +261,11 @@ export default function ReviewPage() {
     rejectContribution,
     submitFeedback,
     resolveFeedback,
-    rejectFeedback
+    rejectFeedback,
+    highlightId,
+    defaultTab,
+    setHighlightId,
+    setDefaultTab
   } = useReviewStore();
 
   const [activeTab, setActiveTab] = useState<TabKey>('pending');
@@ -291,6 +295,35 @@ export default function ReviewPage() {
   const [feedbackQuickRemarks, setFeedbackQuickRemarks] = useState<Record<string, string>>({});
 
   const [editedContent, setEditedContent] = useState<EditedArticleContent>({});
+
+  const initializedRef = useRef(false);
+
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
+    if (defaultTab !== 'pending') {
+      setActiveTab(defaultTab);
+    }
+
+    if (highlightId) {
+      const target = contributions.find(c => {
+        if (c.type === 'new_article') {
+          return c.id === highlightId;
+        }
+        return c.articleId === highlightId;
+      });
+
+      if (target) {
+        setActiveTab('history');
+        setTimeout(() => {
+          openDetail(target);
+        }, 100);
+      }
+
+      setHighlightId(null);
+    }
+  }, []);
 
   const [selectedContributions, setSelectedContributions] = useState<Set<string>>(new Set());
   const [selectedFeedbacks, setSelectedFeedbacks] = useState<Set<string>>(new Set());

@@ -160,6 +160,8 @@ interface ReviewStoreState {
   contributions: Contribution[];
   reviewRecords: ReviewRecord[];
   feedbacks: InvalidFeedback[];
+  highlightId: string | null;
+  defaultTab: 'pending' | 'history' | 'feedback';
   submitContribution: (data: Omit<Contribution, 'id' | 'status' | 'createdAt'>) => void;
   approveContribution: (id: string, reviewer: string, remark?: string, editedContent?: EditedContributionData) => void;
   rejectContribution: (id: string, reviewer: string, remark: string) => void;
@@ -170,12 +172,16 @@ interface ReviewStoreState {
   rejectFeedback: (id: string, handler: string, remark: string) => void;
   getPendingFeedbacks: () => InvalidFeedback[];
   getFeedbackHistory: () => InvalidFeedback[];
+  setHighlightId: (id: string | null) => void;
+  setDefaultTab: (tab: 'pending' | 'history' | 'feedback') => void;
 }
 
 export const useReviewStore = create<ReviewStoreState>((set, get) => ({
   contributions: loadContributions(),
   reviewRecords: loadReviewRecords(),
   feedbacks: loadFeedbacks(),
+  highlightId: null,
+  defaultTab: 'pending',
 
   submitContribution: (data) => {
     const { contributions } = get();
@@ -251,6 +257,7 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
         const maxId = existingIds.length > 0 ? Math.max(...existingIds) : 0;
         const newId = `ART-${String(maxId + 1).padStart(3, '0')}`;
 
+        const now = new Date().toISOString();
         const newArticle: Article = {
           id: newId,
           title,
@@ -263,13 +270,18 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
           viewCount: 0,
           ratingAvg: 0,
           ratingCount: 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          createdAt: now,
+          updatedAt: now,
           author: contribution.submitter,
           steps,
           commands,
           incidents: [],
-          cases: []
+          cases: [],
+          source: 'contribution',
+          contributor: contribution.submitter,
+          reviewer,
+          firstPublishedAt: now,
+          lastReviewedAt: now
         };
         articleStore.addNewArticle(newArticle);
       } else if (contribution.type === 'update_article' && contribution.articleId) {
@@ -283,7 +295,9 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
 
           if (edited) {
             const patchData: Partial<Article> = {
-              updatedAt: now
+              updatedAt: now,
+              lastReviewedAt: now,
+              reviewer
             };
             if (edited.service) patchData.service = edited.service as Article['service'];
             if (edited.errorCodes) patchData.errorCodes = edited.errorCodes;
@@ -307,6 +321,8 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
               : updateRecord;
             articleStore.updateArticle(contribution.articleId, {
               updatedAt: now,
+              lastReviewedAt: now,
+              reviewer,
               title: newTitle,
               attention: newAttention
             });
@@ -320,6 +336,11 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
           solution: contribution.summary
         };
         articleStore.addCaseToArticle(contribution.articleId, caseObj);
+        const now = new Date().toISOString();
+        articleStore.updateArticle(contribution.articleId, {
+          lastReviewedAt: now,
+          reviewer
+        });
       }
     }
 
@@ -430,5 +451,8 @@ export const useReviewStore = create<ReviewStoreState>((set, get) => ({
         const dateB = b.handledAt ?? b.createdAt;
         return new Date(dateB).getTime() - new Date(dateA).getTime();
       });
-  }
+  },
+
+  setHighlightId: (id) => set({ highlightId: id }),
+  setDefaultTab: (tab) => set({ defaultTab: tab })
 }));
